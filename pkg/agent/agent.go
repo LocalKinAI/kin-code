@@ -80,6 +80,54 @@ func (a *Agent) SetProvider(p provider.Provider) {
 	a.provider = p
 }
 
+// SaveSession writes conversation to a JSON file.
+func (a *Agent) SaveSession(path string) error {
+	// Skip system prompt — it's regenerated on load.
+	var msgs []provider.Message
+	for _, m := range a.messages {
+		if m.Role != "system" {
+			msgs = append(msgs, m)
+		}
+	}
+	data, err := json.MarshalIndent(msgs, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
+}
+
+// LoadSession reads conversation from a JSON file.
+func (a *Agent) LoadSession(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var msgs []provider.Message
+	if err := json.Unmarshal(data, &msgs); err != nil {
+		return err
+	}
+	// Keep system prompt, append loaded messages.
+	var system []provider.Message
+	for _, m := range a.messages {
+		if m.Role == "system" {
+			system = append(system, m)
+		}
+	}
+	a.messages = append(system, msgs...)
+	return nil
+}
+
+// ClearMessages resets to just the system prompt.
+func (a *Agent) ClearMessages() {
+	var system []provider.Message
+	for _, m := range a.messages {
+		if m.Role == "system" {
+			system = append(system, m)
+		}
+	}
+	a.messages = system
+}
+
 // estimateTokens gives a rough token count (4 chars ~= 1 token).
 func estimateTokens(messages []provider.Message) int {
 	total := 0

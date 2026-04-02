@@ -51,6 +51,7 @@ type REPL struct {
 	agent       *agent.Agent
 	mcpClients  []*mcp.Client
 	historyFile string
+	sessionFile string
 	history     []string
 	totalTokens struct {
 		input  int
@@ -68,6 +69,7 @@ func New(a *agent.Agent, opts ...Option) *REPL {
 	r := &REPL{
 		agent:       a,
 		historyFile: filepath.Join(histDir, "history"),
+		sessionFile: filepath.Join(histDir, "session.json"),
 	}
 	for _, opt := range opts {
 		opt(r)
@@ -78,13 +80,15 @@ func New(a *agent.Agent, opts ...Option) *REPL {
 // Run starts the interactive REPL loop.
 func (r *REPL) Run(ctx context.Context) error {
 	r.loadHistory()
+	r.loadSession()
 	r.printBanner()
 
-	// Handle Ctrl+C gracefully.
+	// Handle Ctrl+C gracefully — save session before exit.
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigChan
+		r.saveSession()
 		fmt.Println("\nGoodbye!")
 		os.Exit(0)
 	}()
@@ -125,6 +129,9 @@ func (r *REPL) Run(ctx context.Context) error {
 			fmt.Printf("%s[tokens: %d in / %d out]%s\n", colorDim, usage.Input, usage.Output, colorReset)
 		}
 		fmt.Println()
+
+		// Auto-save session after each interaction.
+		r.saveSession()
 	}
 }
 
@@ -199,7 +206,8 @@ func (r *REPL) handleCommand(ctx context.Context, input string) bool {
 		fmt.Println("  - Ctrl+D to exit")
 
 	case "/clear":
-		r.agent.Clear()
+		r.agent.ClearMessages()
+		_ = os.Remove(r.sessionFile)
 		fmt.Println(colorDim + "Conversation cleared." + colorReset)
 
 	case "/compact":
@@ -388,6 +396,28 @@ func (r *REPL) addHistory(line string) {
 		r.history = r.history[len(r.history)-1000:]
 	}
 	_ = os.WriteFile(r.historyFile, []byte(strings.Join(r.history, "\n")+"\n"), 0644)
+}
+
+// --- Session Persistence ---
+
+func (r *REPL) loadSession() {
+	if err := r.agent.LoadSession(r.sessionFile); err == nil {
+		msgs := r.agent.Messages()
+		// Count non-system messages
+		count := 0
+		for _, m := range msgs {
+			if m.Role != "system" {
+				count++
+			}
+		}
+		if count > 0 {
+			fmt.Printf("%s[session restored: %d messages]%s\n", colorDim, count, colorReset)
+		}
+	}
+}
+
+func (r *REPL) saveSession() {
+	_ = r.agent.SaveSession(r.sessionFile)
 }
 
 // --- Markdown Terminal Rendering ---
