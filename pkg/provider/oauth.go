@@ -215,7 +215,7 @@ func RefreshTokens(refreshToken string) (*OAuthTokens, error) {
 	return tokens, nil
 }
 
-// GetValidToken returns a valid access token, refreshing if needed.
+// GetValidToken returns a valid OAuth access token, refreshing if needed.
 func GetValidToken() (string, error) {
 	tokens, err := LoadTokens()
 	if err != nil {
@@ -229,6 +229,50 @@ func GetValidToken() (string, error) {
 		return "", fmt.Errorf("token refresh failed (run: kin-code -login): %w", err)
 	}
 	return tokens.AccessToken, nil
+}
+
+// GetValidAPIKey exchanges OAuth token for a temporary API key.
+// Claude 4.x models require a proper API key; raw OAuth tokens don't work.
+func GetValidAPIKey() (string, error) {
+	oauthToken, err := GetValidToken()
+	if err != nil {
+		return "", err
+	}
+	return createAPIKey(oauthToken)
+}
+
+func createAPIKey(oauthToken string) (string, error) {
+	req, err := http.NewRequest("POST",
+		"https://api.anthropic.com/api/oauth/claude_cli/create_api_key",
+		strings.NewReader("{}"))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+oauthToken)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "claude-code/1.0")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("api key exchange: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("api key exchange failed (%d): %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		RawKey string `json:"raw_key"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("parsing api key: %w", err)
+	}
+	if result.RawKey == "" {
+		return "", fmt.Errorf("no api_key in response: %s", string(body))
+	}
+	return result.RawKey, nil
 }
 
 // --- internal helpers ---
