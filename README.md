@@ -14,6 +14,7 @@ Like Claude Code, but open-source and 10x lighter.
 - Streaming responses with markdown rendering
 - Context compaction: auto-summarizes when context gets large
 - Sub-agents: spawn parallel tasks with agent_spawn
+- MCP support: connect any MCP-compatible tool server
 - Persistent memory across sessions
 - Web tools: fetch URLs and search the web (DuckDuckGo, no API key)
 - Fast: Go concurrency, minimal memory footprint
@@ -92,6 +93,37 @@ kin-code
 | Multi-provider | Anthropic only | Multi | **Multi** |
 | Soul files | No | No | **Yes** |
 | Build time | N/A | Minutes | **Seconds** |
+
+## MCP Support
+
+Connect to any [MCP](https://modelcontextprotocol.io/)-compatible tool server:
+
+```bash
+# Create mcp.json
+cat > mcp.json << 'EOF'
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+    },
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": ["GITHUB_TOKEN=ghp_xxx"]
+    }
+  }
+}
+EOF
+
+# Run with MCP servers
+kin-code -mcp mcp.json
+
+# List connected servers and tools
+> /mcp
+```
+
+MCP tools are automatically registered with a `mcp_` prefix (e.g., `mcp_read_file`, `mcp_search_repositories`). The LLM can call them like any built-in tool.
 
 ## Build from Source
 

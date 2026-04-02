@@ -12,9 +12,16 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/LocalKinAI/kin-code/internal/mcp"
 	"github.com/LocalKinAI/kin-code/pkg/agent"
 	"golang.org/x/term"
 )
+
+// MCPClient is the interface needed from MCP clients for the /mcp command.
+type MCPClient interface {
+	Name() string
+	Tools() []mcp.ToolDef
+}
 
 const (
 	colorReset     = "\033[0m"
@@ -29,9 +36,20 @@ const (
 	version = "0.2.0"
 )
 
+// Option configures the REPL.
+type Option func(*REPL)
+
+// WithMCPClients sets the MCP clients for the /mcp command.
+func WithMCPClients(clients []*mcp.Client) Option {
+	return func(r *REPL) {
+		r.mcpClients = clients
+	}
+}
+
 // REPL is the interactive read-eval-print loop.
 type REPL struct {
 	agent       *agent.Agent
+	mcpClients  []*mcp.Client
 	historyFile string
 	history     []string
 	totalTokens struct {
@@ -42,15 +60,19 @@ type REPL struct {
 }
 
 // New creates a new REPL.
-func New(a *agent.Agent) *REPL {
+func New(a *agent.Agent, opts ...Option) *REPL {
 	homeDir, _ := os.UserHomeDir()
 	histDir := filepath.Join(homeDir, ".kin-code")
 	_ = os.MkdirAll(histDir, 0755)
 
-	return &REPL{
+	r := &REPL{
 		agent:       a,
 		historyFile: filepath.Join(histDir, "history"),
 	}
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r
 }
 
 // Run starts the interactive REPL loop.
@@ -166,6 +188,7 @@ func (r *REPL) handleCommand(ctx context.Context, input string) bool {
 		fmt.Println("  /load <file>       — Load conversation from file")
 		fmt.Println("  /tokens            — Show estimated token usage")
 		fmt.Println("  /diff              — Show last file edit as colored diff")
+		fmt.Println("  /mcp               — List connected MCP servers and tools")
 		fmt.Println("  /soul <file>       — Load a soul file mid-session")
 		fmt.Println("  /version           — Show version")
 		fmt.Println("  /quit              — Exit kin-code")
@@ -253,6 +276,23 @@ func (r *REPL) handleCommand(ctx context.Context, input string) bool {
 			fmt.Printf("%sNo recent file edits.%s\n", colorDim, colorReset)
 		} else {
 			fmt.Println(r.lastDiff)
+		}
+
+	case "/mcp":
+		if len(r.mcpClients) == 0 {
+			fmt.Printf("%sNo MCP servers connected. Use -mcp <config.json> to connect.%s\n", colorDim, colorReset)
+		} else {
+			fmt.Println(colorCyan + "MCP Servers:" + colorReset)
+			totalTools := 0
+			for _, c := range r.mcpClients {
+				ts := c.Tools()
+				totalTools += len(ts)
+				fmt.Printf("  %s%s%s (%d tools)\n", colorBold, c.Name(), colorReset, len(ts))
+				for _, t := range ts {
+					fmt.Printf("    %smcp_%s%s — %s\n", colorGreen, t.Name, colorReset, t.Description)
+				}
+			}
+			fmt.Printf("%s%d server(s), %d tool(s) total%s\n", colorDim, len(r.mcpClients), totalTools, colorReset)
 		}
 
 	case "/soul":
