@@ -74,12 +74,13 @@ func OAuthLogin() (*OAuthTokens, error) {
 
 	// Build authorization URL.
 	params := url.Values{
+		"code":                  {"true"},
 		"response_type":         {"code"},
 		"client_id":             {clientID},
 		"redirect_uri":          {redirectURI},
 		"code_challenge":        {challenge},
 		"code_challenge_method": {"S256"},
-		"scope":                 {"user:inference"},
+		"scope":                 {"user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"},
 		"state":                 {state},
 	}
 	authURL := authEndpoint + "?" + params.Encode()
@@ -190,7 +191,7 @@ func RefreshTokens(refreshToken string) (*OAuthTokens, error) {
 		"client_id":     {clientID},
 	}
 
-	resp, err := http.PostForm(tokenEndpoint, form)
+	resp, err := postOAuthForm(tokenEndpoint, form)
 	if err != nil {
 		return nil, fmt.Errorf("refreshing token: %w", err)
 	}
@@ -232,6 +233,17 @@ func GetValidToken() (string, error) {
 
 // --- internal helpers ---
 
+func postOAuthForm(endpoint string, form url.Values) (*http.Response, error) {
+	req, err := http.NewRequest("POST", endpoint, strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("User-Agent", "claude-code/1.0")
+	req.Header.Set("Accept", "application/json")
+	return http.DefaultClient.Do(req)
+}
+
 func exchangeCode(code, verifier string) (*OAuthTokens, error) {
 	form := url.Values{
 		"grant_type":    {"authorization_code"},
@@ -241,7 +253,7 @@ func exchangeCode(code, verifier string) (*OAuthTokens, error) {
 		"redirect_uri":  {redirectURI},
 	}
 
-	resp, err := http.PostForm(tokenEndpoint, form)
+	resp, err := postOAuthForm(tokenEndpoint, form)
 	if err != nil {
 		return nil, err
 	}
