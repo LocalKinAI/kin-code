@@ -14,6 +14,7 @@ import (
 
 	"github.com/LocalKinAI/kin-code/internal/mcp"
 	"github.com/LocalKinAI/kin-code/pkg/agent"
+	"github.com/LocalKinAI/kin-code/pkg/tools"
 	"golang.org/x/term"
 )
 
@@ -50,6 +51,7 @@ func WithMCPClients(clients []*mcp.Client) Option {
 type REPL struct {
 	agent       *agent.Agent
 	mcpClients  []*mcp.Client
+	skills      *tools.SkillStore
 	historyFile string
 	sessionFile string
 	history     []string
@@ -57,7 +59,8 @@ type REPL struct {
 		input  int
 		output int
 	}
-	lastDiff string
+	lastDiff      string
+	pendingSkill  string // skill content to prepend to next message
 }
 
 // New creates a new REPL.
@@ -68,6 +71,7 @@ func New(a *agent.Agent, opts ...Option) *REPL {
 
 	r := &REPL{
 		agent:       a,
+		skills:      tools.NewSkillStore(),
 		historyFile: filepath.Join(histDir, "history"),
 		sessionFile: filepath.Join(histDir, "session.json"),
 	}
@@ -114,6 +118,12 @@ func (r *REPL) Run(ctx context.Context) error {
 
 		// Save to history.
 		r.addHistory(input)
+
+		// Prepend pending skill content if loaded.
+		if r.pendingSkill != "" {
+			input = r.pendingSkill + "\n\n" + input
+			r.pendingSkill = ""
+		}
 
 		// Run through agent.
 		_, usage, err := r.agent.Run(ctx, input)
@@ -196,6 +206,9 @@ func (r *REPL) handleCommand(ctx context.Context, input string) bool {
 		fmt.Println("  /tokens            — Show estimated token usage")
 		fmt.Println("  /diff              — Show last file edit as colored diff")
 		fmt.Println("  /mcp               — List connected MCP servers and tools")
+		fmt.Println("  /skill             — List available skill templates")
+		fmt.Println("  /skill <name>      — Load a skill template for next message")
+		fmt.Println("  /skill create <n>  — Create a new skill interactively")
 		fmt.Println("  /soul <file>       — Load a soul file mid-session")
 		fmt.Println("  /version           — Show version")
 		fmt.Println("  /quit              — Exit kin-code")
@@ -326,6 +339,9 @@ func (r *REPL) handleCommand(ctx context.Context, input string) bool {
 			}
 		}
 
+	case "/skill", "/skills":
+		r.handleSkillCommand(parts)
+
 	case "/version":
 		fmt.Printf("kin-code v%s\n", version)
 
@@ -381,6 +397,62 @@ func (r *REPL) printBanner() {
 	fmt.Printf("%sAI coding assistant — type /help for commands%s\n\n", colorDim, colorReset)
 }
 
+func (r *REPL) handleSkillCommand(parts []string) {
+	if len(parts) < 2 {
+		// List skills
+		names, err := r.skills.List()
+		if err != nil {
+			fmt.Printf("%sError: %s%s\n", colorRed, err, colorReset)
+			return
+		}
+		if len(names) == 0 {
+			fmt.Printf("%sNo skills found. Create one: /skill create <name>%s\n", colorDim, colorReset)
+			fmt.Printf("%sOr copy examples from examples/skills/ to ~/.kin-code/skills/%s\n", colorDim, colorReset)
+			return
+		}
+		fmt.Printf("%sAvailable skills:%s\n", colorBold, colorReset)
+		for _, n := range names {
+			fmt.Printf("  %s%s%s\n", colorCyan, n, colorReset)
+		}
+		fmt.Printf("%sUse: /skill <name> to load%s\n", colorDim, colorReset)
+		return
+	}
+
+	if parts[1] == "create" && len(parts) >= 3 {
+		name := parts[2]
+		fmt.Printf("Enter skill content (empty line to finish):\n")
+		var lines []string
+		for {
+			line, err := r.readInput()
+			if err != nil || strings.TrimSpace(line) == "" {
+				break
+			}
+			lines = append(lines, line)
+		}
+		if len(lines) == 0 {
+			fmt.Printf("%sCancelled.%s\n", colorDim, colorReset)
+			return
+		}
+		content := strings.Join(lines, "\n")
+		if err := r.skills.Save(name, content); err != nil {
+			fmt.Printf("%sError: %s%s\n", colorRed, err, colorReset)
+			return
+		}
+		fmt.Printf("%sSkill saved: %s%s\n", colorGreen, name, colorReset)
+		return
+	}
+
+	// Load skill
+	name := parts[1]
+	content, err := r.skills.Load(name)
+	if err != nil {
+		fmt.Printf("%sSkill not found: %s%s\n", colorRed, name, colorReset)
+		return
+	}
+	r.pendingSkill = content
+	fmt.Printf("%s[skill loaded: %s] — next message will use this template%s\n", colorCyan, name, colorReset)
+}
+
 func (r *REPL) loadHistory() {
 	data, err := os.ReadFile(r.historyFile)
 	if err != nil {
@@ -419,6 +491,8 @@ func (r *REPL) loadSession() {
 func (r *REPL) saveSession() {
 	_ = r.agent.SaveSession(r.sessionFile)
 }
+
+// --- Skill Commands ---
 
 // --- Markdown Terminal Rendering ---
 

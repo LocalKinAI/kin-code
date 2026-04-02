@@ -18,9 +18,12 @@ const (
 
 // AnthropicProvider implements Provider for the Anthropic Messages API.
 type AnthropicProvider struct {
-	apiKey string
-	model  string
-	client *http.Client
+	apiKey         string
+	model          string
+	client         *http.Client
+	thinking       bool
+	thinkingBudget int
+	onThinking     func(string) // callback for thinking content display
 }
 
 // NewAnthropic creates a new Anthropic provider.
@@ -32,16 +35,37 @@ func NewAnthropic(apiKey, model string) *AnthropicProvider {
 	}
 }
 
+// SetThinking enables or disables extended thinking with the given token budget.
+func (a *AnthropicProvider) SetThinking(enabled bool, budget int) {
+	a.thinking = enabled
+	a.thinkingBudget = budget
+	if a.thinkingBudget <= 0 {
+		a.thinkingBudget = 10000
+	}
+}
+
+// SetOnThinking sets a callback for displaying thinking content.
+func (a *AnthropicProvider) SetOnThinking(fn func(string)) {
+	a.onThinking = fn
+}
+
 func (a *AnthropicProvider) Name() string { return "anthropic" }
 
 // anthropicRequest is the request body for the Messages API.
 type anthropicRequest struct {
-	Model     string           `json:"model"`
-	MaxTokens int              `json:"max_tokens"`
-	System    string           `json:"system,omitempty"`
-	Messages  []anthropicMsg   `json:"messages"`
-	Tools     []anthropicTool  `json:"tools,omitempty"`
-	Stream    bool             `json:"stream,omitempty"`
+	Model     string                  `json:"model"`
+	MaxTokens int                     `json:"max_tokens"`
+	System    string                  `json:"system,omitempty"`
+	Messages  []anthropicMsg          `json:"messages"`
+	Tools     []anthropicTool         `json:"tools,omitempty"`
+	Stream    bool                    `json:"stream,omitempty"`
+	Thinking  *anthropicThinkingConfig `json:"thinking,omitempty"`
+}
+
+// anthropicThinkingConfig controls extended thinking.
+type anthropicThinkingConfig struct {
+	Type         string `json:"type"`
+	BudgetTokens int    `json:"budget_tokens"`
 }
 
 type anthropicMsg struct {
@@ -151,6 +175,18 @@ func (a *AnthropicProvider) doRequest(ctx context.Context, messages []Message, t
 		Stream:    stream,
 	}
 
+	// Add extended thinking if enabled.
+	if a.thinking {
+		reqBody.Thinking = &anthropicThinkingConfig{
+			Type:         "enabled",
+			BudgetTokens: a.thinkingBudget,
+		}
+		// Extended thinking requires higher max_tokens.
+		if reqBody.MaxTokens < a.thinkingBudget+4096 {
+			reqBody.MaxTokens = a.thinkingBudget + 4096
+		}
+	}
+
 	body, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
@@ -196,6 +232,7 @@ func (a *AnthropicProvider) handleStream(body io.Reader, onChunk func(string)) (
 	var currentToolCall *ToolCall
 	var currentToolInput strings.Builder
 	var contentBuilder strings.Builder
+	var inThinkingBlock bool
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -243,18 +280,30 @@ func (a *AnthropicProvider) handleStream(body io.Reader, onChunk func(string)) (
 				result.Usage.Input = event.Message.Usage.InputTokens
 			}
 		case "content_block_start":
-			if event.ContentBlock != nil && event.ContentBlock.Type == "tool_use" {
-				currentToolCall = &ToolCall{
-					ID: event.ContentBlock.ID,
-					Function: ToolFunction{
-						Name: event.ContentBlock.Name,
-					},
+			if event.ContentBlock != nil {
+				switch event.ContentBlock.Type {
+				case "tool_use":
+					currentToolCall = &ToolCall{
+						ID: event.ContentBlock.ID,
+						Function: ToolFunction{
+							Name: event.ContentBlock.Name,
+						},
+					}
+					currentToolInput.Reset()
+				case "thinking":
+					inThinkingBlock = true
+					if a.onThinking != nil {
+						a.onThinking("\033[2m[thinking] ")
+					}
 				}
-				currentToolInput.Reset()
 			}
 		case "content_block_delta":
 			if event.Delta != nil {
 				switch event.Delta.Type {
+				case "thinking_delta":
+					if a.onThinking != nil && event.Delta.Text != "" {
+						a.onThinking(event.Delta.Text)
+					}
 				case "text_delta":
 					contentBuilder.WriteString(event.Delta.Text)
 					if onChunk != nil {
@@ -265,6 +314,12 @@ func (a *AnthropicProvider) handleStream(body io.Reader, onChunk func(string)) (
 				}
 			}
 		case "content_block_stop":
+			if inThinkingBlock {
+				inThinkingBlock = false
+				if a.onThinking != nil {
+					a.onThinking("\033[0m\n")
+				}
+			}
 			if currentToolCall != nil {
 				currentToolCall.Function.Arguments = currentToolInput.String()
 				toolCalls = append(toolCalls, *currentToolCall)
@@ -296,6 +351,11 @@ func (a *AnthropicProvider) convertResponse(resp *anthropicResponse) *Response {
 
 	for _, block := range resp.Content {
 		switch block.Type {
+		case "thinking":
+			// Display thinking content in dim text.
+			if a.onThinking != nil && block.Text != "" {
+				a.onThinking(block.Text)
+			}
 		case "text":
 			result.Content += block.Text
 		case "tool_use":
