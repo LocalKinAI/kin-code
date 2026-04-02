@@ -65,6 +65,13 @@ func OAuthLogin() (*OAuthTokens, error) {
 	hash := sha256.Sum256([]byte(verifier))
 	challenge := base64.RawURLEncoding.EncodeToString(hash[:])
 
+	// Generate state parameter for CSRF protection.
+	stateBytes := make([]byte, 16)
+	if _, err := rand.Read(stateBytes); err != nil {
+		return nil, fmt.Errorf("generate state: %w", err)
+	}
+	state := base64.RawURLEncoding.EncodeToString(stateBytes)
+
 	// Build authorization URL.
 	params := url.Values{
 		"response_type":         {"code"},
@@ -73,6 +80,7 @@ func OAuthLogin() (*OAuthTokens, error) {
 		"code_challenge":        {challenge},
 		"code_challenge_method": {"S256"},
 		"scope":                 {"user:inference"},
+		"state":                 {state},
 	}
 	authURL := authEndpoint + "?" + params.Encode()
 
@@ -93,6 +101,14 @@ func OAuthLogin() (*OAuthTokens, error) {
 			errCh <- fmt.Errorf("authorization error: %s — %s", errMsg, q.Get("error_description"))
 			w.Header().Set("Content-Type", "text/html")
 			fmt.Fprintf(w, "<html><body><h2>Authorization failed</h2><p>%s</p><p>You can close this tab.</p></body></html>", errMsg)
+			return
+		}
+
+		// Verify state parameter (CSRF protection).
+		if q.Get("state") != state {
+			errCh <- fmt.Errorf("state mismatch — possible CSRF attack")
+			w.Header().Set("Content-Type", "text/html")
+			fmt.Fprint(w, "<html><body><h2>Error: state mismatch</h2><p>You can close this tab.</p></body></html>")
 			return
 		}
 
