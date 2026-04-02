@@ -23,8 +23,6 @@ const (
 	authEndpoint  = "https://claude.ai/oauth/authorize"
 	tokenEndpoint = "https://platform.claude.com/v1/oauth/token"
 	clientID      = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
-	redirectPort  = "9876"
-	redirectURI   = "http://localhost:" + redirectPort + "/oauth/callback"
 	tokenDir      = ".kin-code"
 	tokenFileName = "oauth.json"
 )
@@ -36,12 +34,10 @@ type OAuthTokens struct {
 	ExpiresAt    time.Time `json:"expires_at"`
 }
 
-// isExpired returns true if the access token has expired or will within 5 minutes.
 func (t *OAuthTokens) isExpired() bool {
 	return time.Now().Add(5 * time.Minute).After(t.ExpiresAt)
 }
 
-// tokenFilePath returns ~/.kin-code/oauth.json, creating the directory if needed.
 func tokenFilePath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -54,23 +50,29 @@ func tokenFilePath() (string, error) {
 	return filepath.Join(dir, tokenFileName), nil
 }
 
-// OAuthLogin performs the full OAuth PKCE flow: opens browser, waits for
-// callback, exchanges code for tokens, saves them, and returns the tokens.
+// OAuthLogin performs the full OAuth PKCE flow.
 func OAuthLogin() (*OAuthTokens, error) {
-	// Generate PKCE code_verifier and code_challenge.
-	verifier, err := randomString(43)
+	// Generate PKCE code_verifier (64 chars) and code_challenge.
+	verifier, err := randomString(64)
 	if err != nil {
 		return nil, fmt.Errorf("generating code verifier: %w", err)
 	}
 	hash := sha256.Sum256([]byte(verifier))
 	challenge := base64.RawURLEncoding.EncodeToString(hash[:])
 
-	// Generate state parameter for CSRF protection.
-	stateBytes := make([]byte, 16)
-	if _, err := rand.Read(stateBytes); err != nil {
-		return nil, fmt.Errorf("generate state: %w", err)
+	// Generate state for CSRF protection.
+	state, err := randomString(32)
+	if err != nil {
+		return nil, fmt.Errorf("generating state: %w", err)
 	}
-	state := base64.RawURLEncoding.EncodeToString(stateBytes)
+
+	// Find an available port for the callback server.
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return nil, fmt.Errorf("starting callback server: %w", err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	redirectURI := fmt.Sprintf("http://localhost:%d/callback", port)
 
 	// Build authorization URL.
 	params := url.Values{
@@ -85,44 +87,51 @@ func OAuthLogin() (*OAuthTokens, error) {
 	}
 	authURL := authEndpoint + "?" + params.Encode()
 
-	// Channels for receiving the auth code or error from the callback.
 	codeCh := make(chan string, 1)
 	errCh := make(chan error, 1)
 
-	// Start local HTTP server for the OAuth callback.
-	listener, err := net.Listen("tcp", "127.0.0.1:"+redirectPort)
-	if err != nil {
-		return nil, fmt.Errorf("starting callback server on port %s: %w", redirectPort, err)
-	}
-
 	mux := http.NewServeMux()
-	mux.HandleFunc("/oauth/callback", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
+
 		if errMsg := q.Get("error"); errMsg != "" {
 			errCh <- fmt.Errorf("authorization error: %s — %s", errMsg, q.Get("error_description"))
-			w.Header().Set("Content-Type", "text/html")
 			fmt.Fprintf(w, "<html><body><h2>Authorization failed</h2><p>%s</p><p>You can close this tab.</p></body></html>", errMsg)
 			return
 		}
 
-		// Verify state parameter (CSRF protection).
-		if q.Get("state") != state {
-			errCh <- fmt.Errorf("state mismatch — possible CSRF attack")
-			w.Header().Set("Content-Type", "text/html")
-			fmt.Fprint(w, "<html><body><h2>Error: state mismatch</h2><p>You can close this tab.</p></body></html>")
+		code := q.Get("code")
+		returnedState := q.Get("state")
+
+		if code == "" {
+			// Code might be in a fragment — serve JS to extract it.
+			fmt.Fprintf(w, `<html><body><script>
+				var hash = window.location.hash.substring(1);
+				if (hash) {
+					window.location.href = "/callback?code=" + encodeURIComponent(hash);
+				} else {
+					document.body.innerHTML = '<h2>Waiting for authorization...</h2>';
+				}
+			</script></body></html>`)
 			return
 		}
 
-		code := q.Get("code")
-		if code == "" {
-			errCh <- fmt.Errorf("no authorization code in callback")
-			w.Header().Set("Content-Type", "text/html")
-			fmt.Fprint(w, "<html><body><h2>Error: no code received</h2><p>You can close this tab.</p></body></html>")
+		// Anthropic may return "code#state" format.
+		if strings.Contains(code, "#") {
+			parts := strings.SplitN(code, "#", 2)
+			code = parts[0]
+			if returnedState == "" && len(parts) > 1 {
+				returnedState = parts[1]
+			}
+		}
+
+		if returnedState != "" && returnedState != state {
+			errCh <- fmt.Errorf("state mismatch")
+			fmt.Fprint(w, "<html><body><h2>State mismatch</h2><p>You can close this tab.</p></body></html>")
 			return
 		}
 
 		codeCh <- code
-		w.Header().Set("Content-Type", "text/html")
 		fmt.Fprint(w, `<html><body style="font-family:system-ui;text-align:center;padding:60px">
 <h2>Login successful!</h2>
 <p>You can close this tab and return to kin-code.</p>
@@ -133,31 +142,26 @@ func OAuthLogin() (*OAuthTokens, error) {
 	go server.Serve(listener)
 	defer server.Shutdown(context.Background())
 
-	// Open browser.
 	fmt.Println("Opening browser for Claude login...")
 	fmt.Printf("If the browser doesn't open, visit:\n%s\n\n", authURL)
 	openBrowser(authURL)
+	fmt.Println("Waiting for authorization (timeout: 5 minutes)...")
 
-	fmt.Println("Waiting for authorization (timeout: 2 minutes)...")
-
-	// Wait for code or timeout.
 	var code string
 	select {
 	case code = <-codeCh:
 	case err := <-errCh:
 		return nil, err
-	case <-time.After(120 * time.Second):
-		return nil, fmt.Errorf("login timed out after 2 minutes")
+	case <-time.After(5 * time.Minute):
+		return nil, fmt.Errorf("login timed out after 5 minutes")
 	}
 
-	// Exchange authorization code for tokens.
 	fmt.Println("Exchanging authorization code for tokens...")
-	tokens, err := exchangeCode(code, verifier)
+	tokens, err := exchangeCode(code, verifier, redirectURI)
 	if err != nil {
 		return nil, fmt.Errorf("exchanging code: %w", err)
 	}
 
-	// Save tokens.
 	if err := saveTokens(tokens); err != nil {
 		return nil, fmt.Errorf("saving tokens: %w", err)
 	}
@@ -166,7 +170,7 @@ func OAuthLogin() (*OAuthTokens, error) {
 	return tokens, nil
 }
 
-// LoadTokens reads saved OAuth tokens from ~/.kin-code/oauth.json.
+// LoadTokens reads saved OAuth tokens.
 func LoadTokens() (*OAuthTokens, error) {
 	path, err := tokenFilePath()
 	if err != nil {
@@ -183,14 +187,13 @@ func LoadTokens() (*OAuthTokens, error) {
 	return &tokens, nil
 }
 
-// RefreshTokens uses the refresh token to obtain new tokens and saves them.
+// RefreshTokens uses refresh_token to get new tokens.
 func RefreshTokens(refreshToken string) (*OAuthTokens, error) {
 	form := url.Values{
 		"grant_type":    {"refresh_token"},
 		"refresh_token": {refreshToken},
 		"client_id":     {clientID},
 	}
-
 	resp, err := postOAuthForm(tokenEndpoint, form)
 	if err != nil {
 		return nil, fmt.Errorf("refreshing token: %w", err)
@@ -206,7 +209,6 @@ func RefreshTokens(refreshToken string) (*OAuthTokens, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	if err := saveTokens(tokens); err != nil {
 		return nil, fmt.Errorf("saving refreshed tokens: %w", err)
 	}
@@ -219,11 +221,9 @@ func GetValidToken() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("no saved tokens (run: kin-code -login): %w", err)
 	}
-
 	if !tokens.isExpired() {
 		return tokens.AccessToken, nil
 	}
-
 	tokens, err = RefreshTokens(tokens.RefreshToken)
 	if err != nil {
 		return "", fmt.Errorf("token refresh failed (run: kin-code -login): %w", err)
@@ -244,7 +244,7 @@ func postOAuthForm(endpoint string, form url.Values) (*http.Response, error) {
 	return http.DefaultClient.Do(req)
 }
 
-func exchangeCode(code, verifier string) (*OAuthTokens, error) {
+func exchangeCode(code, verifier, redirectURI string) (*OAuthTokens, error) {
 	form := url.Values{
 		"grant_type":    {"authorization_code"},
 		"code":          {code},
@@ -252,7 +252,6 @@ func exchangeCode(code, verifier string) (*OAuthTokens, error) {
 		"code_verifier": {verifier},
 		"redirect_uri":  {redirectURI},
 	}
-
 	resp, err := postOAuthForm(tokenEndpoint, form)
 	if err != nil {
 		return nil, err
@@ -263,7 +262,6 @@ func exchangeCode(code, verifier string) (*OAuthTokens, error) {
 		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("token exchange failed (%d): %s", resp.StatusCode, string(body))
 	}
-
 	return parseTokenResponse(resp.Body)
 }
 
