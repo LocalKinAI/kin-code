@@ -99,7 +99,7 @@ go build -o kin-code ./cmd/kin-code/
 
 ## License
 
-Apache 2.0
+MIT
 
 ---
 
