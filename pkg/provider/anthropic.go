@@ -20,6 +20,7 @@ const (
 type AnthropicProvider struct {
 	apiKey         string
 	model          string
+	isOAuth        bool // true = use Bearer auth instead of x-api-key
 	client         *http.Client
 	thinking       bool
 	thinkingBudget int
@@ -33,6 +34,11 @@ func NewAnthropic(apiKey, model string) *AnthropicProvider {
 		model:  model,
 		client: &http.Client{},
 	}
+}
+
+// SetOAuth marks this provider as using OAuth Bearer auth instead of x-api-key.
+func (a *AnthropicProvider) SetOAuth(isOAuth bool) {
+	a.isOAuth = isOAuth
 }
 
 // SetThinking enables or disables extended thinking with the given token budget.
@@ -197,7 +203,11 @@ func (a *AnthropicProvider) doRequest(ctx context.Context, messages []Message, t
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", a.apiKey)
+	if a.isOAuth {
+		req.Header.Set("Authorization", "Bearer "+a.apiKey)
+	} else {
+		req.Header.Set("x-api-key", a.apiKey)
+	}
 	req.Header.Set("anthropic-version", anthropicVersion)
 
 	resp, err := a.client.Do(req)
