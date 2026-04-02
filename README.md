@@ -50,6 +50,23 @@ kin-code "explain this codebase"
 kin-code -yolo "fix the failing tests"
 ```
 
+## Claude Login (No API Key Needed)
+
+Use your Claude account directly — works with Free, Pro, and Max:
+
+```bash
+# First time: login via browser
+kin-code -login
+
+# Then just use it (defaults to Haiku 4.5)
+kin-code
+
+# Or specify a different model
+kin-code -model claude-sonnet-4-6
+```
+
+Your session auto-refreshes. No API key needed.
+
 ## Soul Files
 
 Define custom personas with `.soul.md` files:

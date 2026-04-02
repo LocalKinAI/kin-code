@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.0] - 2026-04-02
+
+### Claude OAuth Login
+- `kin-code -login` — Login via browser using your Claude account (Free/Pro/Max)
+- Full OAuth PKCE flow: browser-based authorization, local callback server
+- Auto-refreshes expired tokens — no manual re-login needed
+- Defaults to Haiku 4.5 for OAuth sessions (included in all Claude plans)
+- Tokens saved to `~/.kin-code/oauth.json` with 0600 permissions
+- Zero API key required — just login and code
+
+**Use your Claude subscription to power kin-code. No API key needed.**
+
 ## [0.4.0] - 2026-04-02
 
 ### Session Persistence
