@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.6.0] - 2026-04-02
+
+### Skill Templates
+- `/skill` — List available skill templates (reusable prompt patterns)
+- `/skill <name>` — Load a skill template; prepended to your next message as context
+- `/skill create <name>` — Create a new skill interactively (multi-line input)
+- Skills stored as `.md` files in `~/.kin-code/skills/`
+- 5 example skills included: `code-review`, `write-tests`, `debug`, `refactor`, `explain`
+
+### Extended Thinking
+- New soul file fields: `thinking: true` and `thinking_budget: 10000`
+- When enabled, the Anthropic provider sends `thinking` config in API requests
+- Thinking content streamed in dim text: `[thinking] ...`
+- Supports both streaming and non-streaming modes
+- Budget defaults to 10,000 tokens; configurable per soul file
+
 ## [0.5.0] - 2026-04-02
 
 ### Claude OAuth Login

@@ -34,7 +34,7 @@ const (
 	colorCyan      = "\033[36m"
 	colorRed       = "\033[31m"
 
-	version = "0.4.0"
+	version = "0.6.0"
 )
 
 // Option configures the REPL.

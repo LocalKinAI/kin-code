@@ -50,8 +50,10 @@ var htmlSpaceRe = regexp.MustCompile(`\s{3,}`)
 
 func stripHTMLTags(s string) string {
 	// Remove script and style blocks.
-	scriptRe := regexp.MustCompile(`(?is)<(script|style)[^>]*>.*?</\1>`)
+	scriptRe := regexp.MustCompile(`(?is)<script[^>]*>.*?</script>`)
 	s = scriptRe.ReplaceAllString(s, "")
+	styleRe := regexp.MustCompile(`(?is)<style[^>]*>.*?</style>`)
+	s = styleRe.ReplaceAllString(s, "")
 
 	// Remove tags.
 	s = htmlTagRe.ReplaceAllString(s, " ")

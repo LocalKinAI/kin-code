@@ -17,6 +17,8 @@ Like Claude Code, but open-source and 10x lighter.
 - MCP support: connect any MCP-compatible tool server
 - Persistent memory across sessions
 - Web tools: fetch URLs and search the web (DuckDuckGo, no API key)
+- Skill templates: reusable prompt patterns (/skill)
+- Extended thinking: deep reasoning mode for complex problems
 - Session persistence: auto-save/restore conversations across restarts
 - Fast: Go concurrency, minimal memory footprint
 
@@ -85,6 +87,20 @@ You are a senior Go developer. You write clean, efficient, well-tested code.
 Focus on simplicity and readability.
 ```
 
+### Extended Thinking
+
+Enable deep reasoning for complex problems:
+
+```yaml
+---
+name: "Architect"
+thinking: true
+thinking_budget: 15000
+---
+```
+
+When enabled, the model will show its reasoning process in dim text before the final response. Useful for complex debugging, architecture decisions, and multi-step analysis.
+
 ## Slash Commands
 
 | Command | Description |
@@ -101,6 +117,9 @@ Focus on simplicity and readability.
 | `/tokens` | Show estimated token usage |
 | `/diff` | Show last file edit as colored diff |
 | `/mcp` | List connected MCP servers and tools |
+| `/skill` | List available skill templates |
+| `/skill <name>` | Load a skill template for next message |
+| `/skill create <name>` | Create a new skill interactively |
 | `/version` | Show version |
 | `/quit` | Exit |
 
