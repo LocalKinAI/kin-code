@@ -8,10 +8,14 @@ Like Claude Code, but open-source and 10x lighter.
 
 - Single binary (~10MB), zero runtime dependencies
 - Multi-provider: Anthropic, OpenAI, Ollama (local models)
-- Built-in tools: bash, file read/write/edit, glob, grep
+- 10 built-in tools: bash, file read/write/edit, glob, grep, web_fetch, web_search, memory, agent_spawn
 - Permission system with tool call confirmation
 - Soul files: define custom personas and rules (.soul.md)
-- Streaming responses
+- Streaming responses with markdown rendering
+- Context compaction: auto-summarizes when context gets large
+- Sub-agents: spawn parallel tasks with agent_spawn
+- Persistent memory across sessions
+- Web tools: fetch URLs and search the web (DuckDuckGo, no API key)
 - Fast: Go concurrency, minimal memory footprint
 
 ## Quick Start

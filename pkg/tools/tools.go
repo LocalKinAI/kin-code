@@ -81,4 +81,16 @@ func RegisterDefaults(r *Registry) {
 	r.Register(&FileEditTool{})
 	r.Register(&GlobTool{})
 	r.Register(&GrepTool{})
+	r.Register(&WebFetchTool{})
+	r.Register(&WebSearchTool{})
+	r.Register(&MemoryTool{})
+}
+
+// RegisterDefaultsWithAgent registers all built-in tools including agent_spawn,
+// which requires a factory to create sub-agent instances.
+func RegisterDefaultsWithAgent(r *Registry, factory SubAgentFactory) {
+	RegisterDefaults(r)
+	r.Register(&AgentSpawnTool{
+		Factory: factory,
+	})
 }

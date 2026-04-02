@@ -87,8 +87,99 @@ func (f *FileEditTool) Execute(args map[string]any) (string, error) {
 		return "", fmt.Errorf("write file: %w", err)
 	}
 
+	// Generate colored diff output.
+	diff := generateDiff(content, newContent, filePath)
+
 	if replaceAll {
-		return fmt.Sprintf("replaced %d occurrences in %s", count, filePath), nil
+		return fmt.Sprintf("replaced %d occurrences in %s\n%s", count, filePath, diff), nil
 	}
-	return fmt.Sprintf("replaced 1 occurrence in %s", filePath), nil
+	return fmt.Sprintf("replaced 1 occurrence in %s\n%s", filePath, diff), nil
+}
+
+const (
+	diffColorRed   = "\033[31m"
+	diffColorGreen = "\033[32m"
+	diffColorGray  = "\033[90m"
+	diffColorReset = "\033[0m"
+)
+
+// generateDiff produces a colored unified-style diff between old and new content.
+func generateDiff(oldContent, newContent, filePath string) string {
+	oldLines := strings.Split(oldContent, "\n")
+	newLines := strings.Split(newContent, "\n")
+
+	// Find changed regions by simple line comparison.
+	type change struct {
+		oldStart, oldEnd int
+		newStart, newEnd int
+	}
+
+	var changes []change
+	oi, ni := 0, 0
+	for oi < len(oldLines) && ni < len(newLines) {
+		if oldLines[oi] == newLines[ni] {
+			oi++
+			ni++
+			continue
+		}
+		// Found a difference — find extent.
+		oStart, nStart := oi, ni
+		// Look ahead in new for where old resumes.
+		found := false
+		for look := 1; look < 50 && (oi+look < len(oldLines) || ni+look < len(newLines)); look++ {
+			// Check if old[oi+look] matches new[ni+look].
+			if oi+look < len(oldLines) && ni+look < len(newLines) && oldLines[oi+look] == newLines[ni+look] {
+				changes = append(changes, change{oStart, oi + look, nStart, ni + look})
+				oi += look
+				ni += look
+				found = true
+				break
+			}
+		}
+		if !found {
+			changes = append(changes, change{oStart, len(oldLines), nStart, len(newLines)})
+			oi = len(oldLines)
+			ni = len(newLines)
+		}
+	}
+	// Handle trailing lines.
+	if oi < len(oldLines) || ni < len(newLines) {
+		changes = append(changes, change{oi, len(oldLines), ni, len(newLines)})
+	}
+
+	if len(changes) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	contextSize := 3
+
+	for _, c := range changes {
+		// Show context before.
+		ctxStart := c.oldStart - contextSize
+		if ctxStart < 0 {
+			ctxStart = 0
+		}
+		for i := ctxStart; i < c.oldStart; i++ {
+			fmt.Fprintf(&sb, "%s %s%s\n", diffColorGray, oldLines[i], diffColorReset)
+		}
+		// Show removed lines.
+		for i := c.oldStart; i < c.oldEnd; i++ {
+			fmt.Fprintf(&sb, "%s-%s%s\n", diffColorRed, oldLines[i], diffColorReset)
+		}
+		// Show added lines.
+		for i := c.newStart; i < c.newEnd; i++ {
+			fmt.Fprintf(&sb, "%s+%s%s\n", diffColorGreen, newLines[i], diffColorReset)
+		}
+		// Show context after.
+		ctxEnd := c.oldEnd + contextSize
+		if ctxEnd > len(oldLines) {
+			ctxEnd = len(oldLines)
+		}
+		for i := c.oldEnd; i < ctxEnd; i++ {
+			fmt.Fprintf(&sb, "%s %s%s\n", diffColorGray, oldLines[i], diffColorReset)
+		}
+	}
+
+	return sb.String()
 }

@@ -60,6 +60,91 @@ func New(cfg Config) *Agent {
 	return a
 }
 
+// Messages returns the current conversation messages (for external inspection).
+func (a *Agent) Messages() []provider.Message {
+	return a.messages
+}
+
+// Provider returns the agent's provider.
+func (a *Agent) Provider() provider.Provider {
+	return a.provider
+}
+
+// SystemPrompt returns the agent's system prompt.
+func (a *Agent) SystemPrompt() string {
+	return a.systemPrompt
+}
+
+// SetProvider replaces the agent's provider (for mid-session switching).
+func (a *Agent) SetProvider(p provider.Provider) {
+	a.provider = p
+}
+
+// estimateTokens gives a rough token count (4 chars ~= 1 token).
+func estimateTokens(messages []provider.Message) int {
+	total := 0
+	for _, m := range messages {
+		total += len(m.Content) / 4
+		for _, tc := range m.ToolCalls {
+			total += len(tc.Function.Arguments) / 4
+		}
+	}
+	return total
+}
+
+// compactIfNeeded checks if messages exceed 80% of estimated token budget and compacts.
+// Uses a rough budget of 100k tokens (typical context window).
+func (a *Agent) compactIfNeeded(ctx context.Context) {
+	const tokenBudget = 100000
+	estimated := estimateTokens(a.messages)
+	if estimated < int(float64(tokenBudget)*0.8) {
+		return
+	}
+
+	// Keep system prompt and last 5 messages.
+	var systemMsg *provider.Message
+	start := 0
+	if len(a.messages) > 0 && a.messages[0].Role == "system" {
+		systemMsg = &a.messages[0]
+		start = 1
+	}
+
+	rest := a.messages[start:]
+	if len(rest) <= 5 {
+		return // not enough to compact
+	}
+
+	older := rest[:len(rest)-5]
+	recent := rest[len(rest)-5:]
+
+	// Ask the LLM to summarize older messages.
+	summaryReq := []provider.Message{
+		{Role: "system", Content: "Summarize this conversation in 3 sentences. Preserve key file paths, decisions, and code changes."},
+		{Role: "user", Content: formatMessages(older)},
+	}
+
+	resp, err := a.provider.Chat(ctx, summaryReq, nil)
+	if err != nil {
+		// If summary fails, just continue without compaction.
+		return
+	}
+
+	// Rebuild messages.
+	a.messages = nil
+	if systemMsg != nil {
+		a.messages = append(a.messages, *systemMsg)
+	}
+	a.messages = append(a.messages, provider.Message{
+		Role:    "user",
+		Content: "Previous conversation summary: " + resp.Content,
+	})
+	a.messages = append(a.messages, provider.Message{
+		Role:    "assistant",
+		Content: "Understood. I have the context from our previous conversation.",
+	})
+	a.messages = append(a.messages, recent...)
+}
+
 // Run processes a user message through the agent loop.
 // It streams output to the terminal and returns the final text response.
 func (a *Agent) Run(ctx context.Context, userMessage string) (string, *provider.Usage, error) {
@@ -71,6 +156,9 @@ func (a *Agent) Run(ctx context.Context, userMessage string) (string, *provider.
 	totalUsage := &provider.Usage{}
 
 	for round := 0; round < a.maxRounds; round++ {
+		// Compact if context is getting large.
+		a.compactIfNeeded(ctx)
+
 		toolDefs := a.tools.Defs()
 
 		resp, err := a.provider.Stream(ctx, a.messages, toolDefs, func(chunk string) {
@@ -190,6 +278,28 @@ func toolSummary(name string, args map[string]any) string {
 				parts = append(parts, "in "+path)
 			}
 			return strings.Join(parts, " ")
+		}
+	case "web_fetch":
+		if u, ok := args["url"].(string); ok {
+			return u
+		}
+	case "web_search":
+		if q, ok := args["query"].(string); ok {
+			return q
+		}
+	case "memory":
+		if a, ok := args["action"].(string); ok {
+			if k, ok := args["key"].(string); ok {
+				return a + " " + k
+			}
+			return a
+		}
+	case "agent_spawn":
+		if t, ok := args["task"].(string); ok {
+			if len(t) > 80 {
+				return t[:80] + "..."
+			}
+			return t
 		}
 	}
 	return ""
