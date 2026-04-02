@@ -203,12 +203,13 @@ func (a *AnthropicProvider) doRequest(ctx context.Context, messages []Message, t
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", anthropicVersion)
 	if a.isOAuth {
 		req.Header.Set("Authorization", "Bearer "+a.apiKey)
+		req.Header.Set("anthropic-beta", "oauth-2025-04-20")
 	} else {
 		req.Header.Set("x-api-key", a.apiKey)
 	}
-	req.Header.Set("anthropic-version", anthropicVersion)
 
 	resp, err := a.client.Do(req)
 	if err != nil {
