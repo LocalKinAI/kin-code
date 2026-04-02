@@ -67,32 +67,69 @@ You are a senior Go developer. You write clean, efficient, well-tested code.
 Focus on simplicity and readability.
 ```
 
+## Slash Commands
+
+| Command | Description |
+|---|---|
+| `/help` | Show all commands |
+| `/clear` | Clear conversation history |
+| `/compact` | Manually compress context |
+| `/model <name>` | Switch model mid-session |
+| `/provider <name>` | Switch provider |
+| `/soul <file>` | Load a soul file |
+| `/memory` | Show persistent memory |
+| `/save <file>` | Save conversation to file |
+| `/load <file>` | Load conversation from file |
+| `/tokens` | Show estimated token usage |
+| `/diff` | Show last file edit as colored diff |
+| `/mcp` | List connected MCP servers and tools |
+| `/version` | Show version |
+| `/quit` | Exit |
+
 ## Architecture
 
 ```
-kin-code
-├── cmd/kin-code/     # CLI entry point
+kin-code (9MB single binary)
+├── cmd/kin-code/       # CLI entry point, flag parsing, soul loading
 ├── pkg/
-│   ├── agent/        # Core agent loop (message → tool → response)
-│   ├── provider/     # LLM providers (Anthropic, OpenAI, Ollama)
-│   ├── tools/        # Built-in tools (bash, file ops, search)
-│   ├── repl/         # Interactive terminal (readline, colors)
-│   └── permission/   # Tool call approval system
+│   ├── agent/          # Core loop: message → LLM → tool calls → loop
+│   │                   # Context compaction (auto-summarize at 80%)
+│   ├── provider/       # LLM providers (raw HTTP, no SDKs)
+│   │   ├── anthropic   # Anthropic Messages API + SSE streaming
+│   │   └── openai      # OpenAI-compatible (OpenAI/Ollama/DeepSeek/Gemini/...)
+│   ├── tools/          # 10 built-in tools
+│   │   ├── bash        # Shell execution (30s timeout, blocklist)
+│   │   ├── file_*      # Read, write, edit (with diff visualization)
+│   │   ├── glob/grep   # File and content search
+│   │   ├── web_*       # Fetch URLs, DuckDuckGo search
+│   │   ├── memory      # Persistent key-value store
+│   │   └── agent_spawn # Sub-agent for parallel tasks
+│   ├── repl/           # Interactive terminal
+│   │                   # Readline, markdown rendering, 14 slash commands
+│   └── permission/     # Tool call approval (yolo / confirm)
 └── internal/
-    └── mcp/          # MCP protocol support (planned)
+    └── mcp/            # MCP protocol client (JSON-RPC 2.0 over stdio)
 ```
 
 ## Comparison
 
-| | Claude Code | claw-code | kin-code |
-|---|---|---|---|
-| Language | TypeScript | Rust | **Go** |
-| Binary size | ~100MB | ~15MB | **~10MB** |
-| Memory | ~150MB | ~30MB | **~20MB** |
-| Dependencies | npm ecosystem | cargo | **zero** |
-| Multi-provider | Anthropic only | Multi | **Multi** |
-| Soul files | No | No | **Yes** |
-| Build time | N/A | Minutes | **Seconds** |
+| | Claude Code | claw-code (Rust) | nano-claude-code (Python) | **kin-code (Go)** |
+|---|---|---|---|---|
+| Binary size | ~100MB | ~15MB | N/A (needs Python) | **9MB** |
+| Memory usage | ~150MB | ~30MB | ~80MB | **~20MB** |
+| Dependencies | Node.js + npm | Rust toolchain | Python 3.10+ | **zero** |
+| Install | npm install | cargo build | pip install | **download & run** |
+| Providers | Anthropic | Multi | 10+ | **any OpenAI-compatible** |
+| Built-in tools | 40+ | ~20 | 13 | **10 + MCP** |
+| Sub-agents | ✅ | ❌ | ✅ | **✅** |
+| Memory | ✅ | ❌ | ✅ | **✅** |
+| Context compaction | ✅ | ✅ | ✅ | **✅** |
+| MCP protocol | ✅ | ✅ | ❌ | **✅** |
+| Markdown rendering | ✅ | ✅ | ❌ | **✅** |
+| Diff visualization | ❌ | ❌ | ✅ | **✅** |
+| Web search | ❌ | ❌ | ✅ | **✅** |
+| Soul files | ❌ | ❌ | ❌ | **✅ unique** |
+| Open source | ❌ | ✅ | ✅ | **✅** |
 
 ## MCP Support
 
