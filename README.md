@@ -17,6 +17,7 @@ Like Claude Code, but open-source and 10x lighter.
 - MCP support: connect any MCP-compatible tool server
 - Persistent memory across sessions
 - Web tools: fetch URLs and search the web (DuckDuckGo, no API key)
+- Session persistence: auto-save/restore conversations across restarts
 - Fast: Go concurrency, minimal memory footprint
 
 ## Quick Start
@@ -128,6 +129,7 @@ kin-code (9MB single binary)
 | Markdown rendering | ✅ | ✅ | ❌ | **✅** |
 | Diff visualization | ❌ | ❌ | ✅ | **✅** |
 | Web search | ❌ | ❌ | ✅ | **✅** |
+| Session persistence | ✅ | ✅ | ✅ | **✅** |
 | Soul files | ❌ | ❌ | ❌ | **✅ unique** |
 | Open source | ❌ | ✅ | ✅ | **✅** |
 

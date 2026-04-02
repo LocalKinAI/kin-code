@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.0] - 2026-04-02
+
+### Session Persistence
+- Auto-save conversation to `~/.kin-code/session.json` after each interaction
+- Auto-restore previous session on startup (shows "[session restored: N messages]")
+- Auto-save on Ctrl+C / SIGTERM (no lost conversations)
+- `/clear` now also deletes session file for a clean start
+- Session excludes system prompt (regenerated from soul file on load)
+
 ## [0.3.0] - 2026-04-02
 
 ### MCP Protocol Support
