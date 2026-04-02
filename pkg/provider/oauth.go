@@ -157,7 +157,7 @@ func OAuthLogin() (*OAuthTokens, error) {
 	}
 
 	fmt.Println("Exchanging authorization code for tokens...")
-	tokens, err := exchangeCode(code, verifier, redirectURI)
+	tokens, err := exchangeCode(code, verifier, redirectURI, state)
 	if err != nil {
 		return nil, fmt.Errorf("exchanging code: %w", err)
 	}
@@ -244,13 +244,14 @@ func postOAuthForm(endpoint string, form url.Values) (*http.Response, error) {
 	return http.DefaultClient.Do(req)
 }
 
-func exchangeCode(code, verifier, redirectURI string) (*OAuthTokens, error) {
+func exchangeCode(code, verifier, redirectURI, state string) (*OAuthTokens, error) {
 	form := url.Values{
 		"grant_type":    {"authorization_code"},
 		"code":          {code},
 		"client_id":     {clientID},
 		"code_verifier": {verifier},
 		"redirect_uri":  {redirectURI},
+		"state":         {state},
 	}
 	resp, err := postOAuthForm(tokenEndpoint, form)
 	if err != nil {
