@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/LocalKinAI/kincode/internal/mcp"
 	"github.com/LocalKinAI/kincode/pkg/agent"
@@ -24,6 +25,12 @@ import (
 const version = "0.6.0"
 
 func main() {
+	// Subprocess hygiene: when kincode runs as a child (typically of
+	// KinClaw Mac), exit cleanly when the parent dies instead of
+	// being reparented to launchd and leaking the bound port. No-op
+	// when launched standalone from the CLI.
+	startOrphanWatch()
+
 	providerName := flag.String("provider", "anthropic", "LLM provider: anthropic, openai, ollama")
 	model := flag.String("model", "claude-sonnet-4-6", "Model name")
 	soulFile := flag.String("soul", "", "Path to .soul.md file for personality/rules")
@@ -333,6 +340,34 @@ func runServe(ctx context.Context, a *agent.Agent, port int, providerName, model
 		fmt.Fprintf(os.Stderr, "serve failed: %s\n", err)
 		os.Exit(1)
 	}
+}
+
+// startOrphanWatch fires a goroutine that exits the process when the
+// original parent dies. macOS doesn't SIGTERM children automatically
+// when their parent goes away — they get reparented to launchd (pid
+// 1) and keep running, leaking subprocess + port until manually
+// killed. Polling os.Getppid() every 2s catches the reparenting and
+// triggers a clean exit.
+//
+// Skipped when the recorded parent is already pid <=1 — that means
+// we were launched directly by launchd (or already orphaned), so
+// there's nothing to watch for.
+func startOrphanWatch() {
+	origParent := os.Getppid()
+	if origParent <= 1 {
+		return
+	}
+	go func() {
+		t := time.NewTicker(2 * time.Second)
+		defer t.Stop()
+		for range t.C {
+			if os.Getppid() != origParent {
+				fmt.Fprintln(os.Stderr,
+					"[orphan-watch] parent died, exiting")
+				os.Exit(0)
+			}
+		}
+	}()
 }
 
 // stringifyArgs flattens the agent's structured tool arguments into a
