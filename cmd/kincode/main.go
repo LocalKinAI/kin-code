@@ -58,6 +58,46 @@ func main() {
 		os.Exit(0)
 	}
 
+	// Track which flags the user set explicitly. Used below to let
+	// CLI flags override soul brain config — explicit always wins.
+	explicitFlag := map[string]bool{}
+	flag.Visit(func(f *flag.Flag) { explicitFlag[f.Name] = true })
+
+	// Load soul file early — its brain config can change the provider /
+	// model / endpoint we pick below, so we need it before key resolution.
+	systemPrompt := defaultSystemPrompt()
+	var soulFM *soulFrontmatter
+	if *soulFile != "" {
+		sp, fm, err := loadSoulFile(*soulFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error loading soul file: %s\n", err)
+			os.Exit(1)
+		}
+		systemPrompt = sp
+		soulFM = fm
+	}
+
+	// Apply soul brain config — fills in any flag the CLI didn't set
+	// explicitly. Lets a soul like Pilot (brain.provider=ollama,
+	// brain.model=kimi-k2.5:cloud) drive kincode just by passing
+	// `-soul pilot.soul.md` — same shape kinclaw uses.
+	if soulFM != nil {
+		if soulFM.Brain != nil {
+			if !explicitFlag["provider"] && soulFM.Brain.Provider != "" {
+				*providerName = soulFM.Brain.Provider
+			}
+			if !explicitFlag["model"] && soulFM.Brain.Model != "" {
+				*model = soulFM.Brain.Model
+			}
+			if !explicitFlag["endpoint"] && soulFM.Brain.Endpoint != "" {
+				*endpoint = soulFM.Brain.Endpoint
+			}
+		} else if soulFM.Model != "" && !explicitFlag["model"] {
+			// Legacy top-level model: field — older kincode souls.
+			*model = soulFM.Model
+		}
+	}
+
 	// Resolve API key.
 	key := *apiKey
 	isOAuth := false
@@ -165,18 +205,8 @@ func main() {
 		p = provider.NewOpenAI(key, mdl, ep)
 	}
 
-	// Load system prompt from soul file.
-	systemPrompt := defaultSystemPrompt()
-	var soulFM *soulFrontmatter
-	if *soulFile != "" {
-		sp, fm, err := loadSoulFile(*soulFile)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error loading soul file: %s\n", err)
-			os.Exit(1)
-		}
-		systemPrompt = sp
-		soulFM = fm
-	}
+	// (Soul was loaded earlier — soul.brain config influenced the
+	//  provider/model/endpoint resolution above.)
 
 	// Configure extended thinking if enabled in soul file.
 	if soulFM != nil && soulFM.Thinking {
@@ -434,13 +464,56 @@ Guidelines:
 }
 
 // soulFrontmatter represents the YAML frontmatter in a .soul.md file.
+//
+// Format compatibility: kincode souls now mirror the kinclaw kernel's
+// soul shape, so the same .soul.md file works for both kernels (the
+// SSE protocol unification + this brain unification together mean
+// kincode is a drop-in alternate kernel for any kinclaw soul).
+//
+//	---
+//	name: "KinClaw Coder"
+//	rules:
+//	  - "..."
+//	brain:
+//	  provider: "ollama"
+//	  model: "kimi-k2.5:cloud"
+//	  temperature: 0.3
+//	  context_length: 131072
+//	  endpoint: "http://localhost:11434/v1/chat/completions"
+//	thinking: true
+//	thinking_budget: 10000
+//	---
+//	You are a senior engineer...
+//
+// Resolution precedence (CLI flag > soul brain > soul legacy >
+// hardcoded default):
+//   - If the user passed -provider/-model/-endpoint on the CLI, those
+//     win regardless of what the soul says.
+//   - Otherwise, soul.brain takes effect.
+//   - Otherwise, the legacy top-level `model:` field (kept for back-
+//     compat with kincode <0.7 souls).
+//   - Otherwise, the per-provider defaults baked into main.
 type soulFrontmatter struct {
-	Name           string   `yaml:"name"`
-	Temperature    float64  `yaml:"temperature"`
-	Rules          []string `yaml:"rules"`
-	Model          string   `yaml:"model"`
-	Thinking       bool     `yaml:"thinking"`
-	ThinkingBudget int      `yaml:"thinking_budget"`
+	Name           string     `yaml:"name"`
+	Rules          []string   `yaml:"rules"`
+	Brain          *soulBrain `yaml:"brain,omitempty"`
+	Model          string     `yaml:"model"`       // legacy — top-level model string
+	Temperature    float64    `yaml:"temperature"` // legacy — top-level temp (unused)
+	Thinking       bool       `yaml:"thinking"`
+	ThinkingBudget int        `yaml:"thinking_budget"`
+}
+
+// soulBrain mirrors kinclaw's nested brain config. Provider + model
+// are the meaningful fields; Endpoint lets ollama souls point at a
+// non-default Ollama install (e.g. remote LAN box). ContextLength
+// is parsed for kinclaw-soul fidelity but kincode doesn't enforce
+// it client-side — providers expose their own context limits.
+type soulBrain struct {
+	Provider      string  `yaml:"provider"`
+	Model         string  `yaml:"model"`
+	Temperature   float64 `yaml:"temperature"`
+	ContextLength int     `yaml:"context_length"`
+	Endpoint      string  `yaml:"endpoint"`
 }
 
 // mcpConfigFile is the JSON structure for MCP server configuration.
