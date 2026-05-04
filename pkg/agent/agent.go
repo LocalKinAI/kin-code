@@ -193,9 +193,75 @@ func (a *Agent) compactIfNeeded(ctx context.Context) {
 	a.messages = append(a.messages, recent...)
 }
 
-// Run processes a user message through the agent loop.
-// It streams output to the terminal and returns the final text response.
+// Events bundles streaming hooks the agent calls during a turn. Any
+// nil func is treated as a no-op. Used by both Run (terminal-style
+// stdout sink) and RunWithEvents (server-style SSE sink) — same loop,
+// different output surfaces.
+type Events struct {
+	// OnText fires for every streamed assistant token chunk.
+	OnText func(chunk string)
+	// OnToolCall fires when the model requests a tool, BEFORE execution.
+	// Useful for the UI to render a "🔨 running bash: ls" placeholder
+	// while the tool runs.
+	OnToolCall func(id, name, summary string, args map[string]any)
+	// OnToolResult fires after tool execution. err is non-nil only for
+	// hard failures (parse errors, denied permission); tool stderr/non-
+	// zero exit is folded into result so the model sees the same string
+	// the user does.
+	OnToolResult func(id, name, result string, err error)
+	// OnAssistantDone fires once the model finishes a streaming response
+	// (after each round). Lets the UI commit the assistant bubble and
+	// reset for the next round.
+	OnAssistantDone func(content string)
+}
+
+// noop returns a callback that does nothing — saves nil-checks at every
+// call site.
+func (e Events) text(s string) {
+	if e.OnText != nil {
+		e.OnText(s)
+	}
+}
+func (e Events) toolCall(id, name, summary string, args map[string]any) {
+	if e.OnToolCall != nil {
+		e.OnToolCall(id, name, summary, args)
+	}
+}
+func (e Events) toolResult(id, name, result string, err error) {
+	if e.OnToolResult != nil {
+		e.OnToolResult(id, name, result, err)
+	}
+}
+func (e Events) assistantDone(content string) {
+	if e.OnAssistantDone != nil {
+		e.OnAssistantDone(content)
+	}
+}
+
+// Run processes a user message through the agent loop, streaming
+// output to the terminal. Convenience wrapper around RunWithEvents
+// for REPL/CLI use.
 func (a *Agent) Run(ctx context.Context, userMessage string) (string, *provider.Usage, error) {
+	return a.RunWithEvents(ctx, userMessage, Events{
+		OnText: func(chunk string) { fmt.Print(chunk) },
+		OnToolCall: func(_, name, summary string, _ map[string]any) {
+			fmt.Fprintf(os.Stderr, "\033[2m[%s] %s\033[0m\n", name, summary)
+		},
+		OnAssistantDone: func(content string) {
+			if content != "" {
+				fmt.Println() // newline after streaming
+			}
+		},
+	})
+}
+
+// RunWithEvents is the same loop as Run but routes streaming output
+// through a caller-supplied Events sink. The HTTP server uses this
+// to fan tokens + tool calls into SSE; tests use it to assert against
+// captured events. Tool permissions still go through the configured
+// permission.Manager — pass permission.New(true) (yolo) for
+// non-interactive callers like the server.
+func (a *Agent) RunWithEvents(ctx context.Context, userMessage string, ev Events) (string, *provider.Usage, error) {
 	a.messages = append(a.messages, provider.Message{
 		Role:    "user",
 		Content: userMessage,
@@ -209,9 +275,7 @@ func (a *Agent) Run(ctx context.Context, userMessage string) (string, *provider.
 
 		toolDefs := a.tools.Defs()
 
-		resp, err := a.provider.Stream(ctx, a.messages, toolDefs, func(chunk string) {
-			fmt.Print(chunk)
-		})
+		resp, err := a.provider.Stream(ctx, a.messages, toolDefs, ev.text)
 		if err != nil {
 			return "", totalUsage, fmt.Errorf("provider error: %w", err)
 		}
@@ -227,22 +291,24 @@ func (a *Agent) Run(ctx context.Context, userMessage string) (string, *provider.
 		}
 		a.messages = append(a.messages, assistantMsg)
 
+		ev.assistantDone(resp.Content)
+
 		// If no tool calls, we're done.
 		if len(resp.ToolCalls) == 0 {
-			if resp.Content != "" {
-				fmt.Println() // newline after streaming
-			}
 			return resp.Content, totalUsage, nil
 		}
 
-		fmt.Println() // newline after any streamed content
-
 		// Execute tool calls.
 		for _, tc := range resp.ToolCalls {
-			result, err := a.executeTool(tc)
-			if err != nil {
-				result = fmt.Sprintf("Error: %s", err)
+			args := parseToolArgs(tc)
+			summary := toolSummary(tc.Function.Name, args)
+			ev.toolCall(tc.ID, tc.Function.Name, summary, args)
+
+			result, execErr := a.executeTool(tc)
+			if execErr != nil {
+				result = fmt.Sprintf("Error: %s", execErr)
 			}
+			ev.toolResult(tc.ID, tc.Function.Name, result, execErr)
 
 			// Add tool result to messages.
 			a.messages = append(a.messages, provider.Message{
@@ -254,6 +320,15 @@ func (a *Agent) Run(ctx context.Context, userMessage string) (string, *provider.
 	}
 
 	return "", totalUsage, fmt.Errorf("reached max rounds (%d) without completing", a.maxRounds)
+}
+
+// parseToolArgs decodes a tool call's JSON arguments into a map.
+// Returns an empty map on parse error so the summary code can still
+// run (it just produces "" instead of a useful label).
+func parseToolArgs(tc provider.ToolCall) map[string]any {
+	var args map[string]any
+	_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
+	return args
 }
 
 func (a *Agent) executeTool(tc provider.ToolCall) (string, error) {
@@ -283,8 +358,8 @@ func (a *Agent) executeTool(tc provider.ToolCall) (string, error) {
 		return "Tool call denied by user.", nil
 	}
 
-	// Show tool execution.
-	fmt.Fprintf(os.Stderr, "\033[2m[%s] %s\033[0m\n", tc.Function.Name, summary)
+	// Display side: callers (Run, RunWithEvents) emit a tool_call event
+	// BEFORE invoking executeTool, so we don't print here.
 
 	result, err := tool.Execute(args)
 	if err != nil {

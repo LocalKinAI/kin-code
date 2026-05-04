@@ -9,12 +9,14 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/LocalKinAI/kincode/internal/mcp"
 	"github.com/LocalKinAI/kincode/pkg/agent"
 	"github.com/LocalKinAI/kincode/pkg/permission"
 	"github.com/LocalKinAI/kincode/pkg/provider"
 	"github.com/LocalKinAI/kincode/pkg/repl"
+	"github.com/LocalKinAI/kincode/pkg/server"
 	"github.com/LocalKinAI/kincode/pkg/tools"
 	"gopkg.in/yaml.v3"
 )
@@ -31,6 +33,8 @@ func main() {
 	yolo := flag.Bool("yolo", false, "Auto-approve all tool calls without confirmation")
 	showVersion := flag.Bool("version", false, "Show version and exit")
 	login := flag.Bool("login", false, "Login via Claude OAuth (use your Claude account, no API key needed)")
+	serve := flag.Bool("serve", false, "Run as HTTP+SSE server instead of REPL (for desktop shells)")
+	port := flag.Int("port", 5002, "Port for -serve mode (default 5002, sits next to kinclaw on 5001)")
 	flag.Parse()
 
 	if *showVersion {
@@ -172,8 +176,16 @@ func main() {
 		}
 	}()
 
-	// Initialize permissions.
-	perms := permission.New(*yolo)
+	// Initialize permissions. Server mode forces yolo: there's no
+	// user-facing prompt loop to gate tool calls through, and the
+	// desktop shell's permission UI isn't wired in v1. Surface this
+	// in the log so it's not surprising.
+	yoloEffective := *yolo
+	if *serve && !yoloEffective {
+		fmt.Fprintln(os.Stderr, "[serve] forcing -yolo: server mode has no permission prompt loop")
+		yoloEffective = true
+	}
+	perms := permission.New(yoloEffective)
 
 	// Create agent.
 	a := agent.New(agent.Config{
@@ -184,6 +196,13 @@ func main() {
 	})
 
 	ctx := context.Background()
+
+	// Server mode: run as HTTP+SSE host instead of REPL. Spawned by
+	// KinClaw Mac (or any other desktop shell) on a known port.
+	if *serve {
+		runServe(ctx, a, *port, *providerName, mdl)
+		return
+	}
 
 	// Check if there's a message from command line args.
 	if args := flag.Args(); len(args) > 0 {
@@ -200,6 +219,103 @@ func main() {
 	r := repl.New(a, repl.WithMCPClients(mcpClients))
 	if err := r.Run(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+		os.Exit(1)
+	}
+}
+
+// runServe is the -serve mode entrypoint. Wires the agent to the
+// HTTP server and translates Agent.Events callbacks into SSE events.
+//
+// Concurrency: only one turn runs at a time — handleChatPost holds
+// turnCancel while the chatHandler goroutine is in flight, and a
+// second POST while busy still echoes user_message + 202 but the
+// agent.RunWithEvents call serializes on a.messages naturally
+// (mutex would be cleaner but Stage 1 keeps it minimal — KinClaw Mac
+// gates send button on turn_done anyway).
+func runServe(ctx context.Context, a *agent.Agent, port int, providerName, model string) {
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+
+	var (
+		turnMu     sync.Mutex
+		turnCancel context.CancelFunc
+		srv        *server.Server // declared up-front so the chat handler closure can reference it
+	)
+
+	srv = server.New(addr, func(_ context.Context, message string) {
+		// Cancel any prior turn that's somehow still in flight, then
+		// install our own cancel for the new one.
+		turnMu.Lock()
+		if turnCancel != nil {
+			turnCancel()
+		}
+		turnCtx, cancel := context.WithCancel(context.Background())
+		turnCancel = cancel
+		turnMu.Unlock()
+
+		defer func() {
+			turnMu.Lock()
+			if turnCancel != nil {
+				turnCancel = nil
+			}
+			turnMu.Unlock()
+		}()
+
+		_, usage, err := a.RunWithEvents(turnCtx, message, agent.Events{
+			OnText: func(chunk string) {
+				if chunk == "" {
+					return
+				}
+				srv.Push(server.Event{Type: "text_delta", Text: chunk})
+			},
+			OnToolCall: func(id, name, summary string, args map[string]any) {
+				srv.Push(server.Event{
+					Type: "tool_call", ID: id, Name: name, Summary: summary, Args: args,
+				})
+			},
+			OnToolResult: func(id, name, result string, err error) {
+				ev := server.Event{Type: "tool_result", ID: id, Name: name, Output: result}
+				if err != nil {
+					ev.Message = err.Error()
+				}
+				srv.Push(ev)
+			},
+			OnAssistantDone: func(_ string) {
+				// turn_done fires below after the whole loop, not per
+				// round — UI cares about "agent finished, you can type"
+				// not "model paused for tool call".
+			},
+		})
+		if err != nil {
+			srv.Push(server.Event{Type: "error", Message: err.Error()})
+		}
+		srv.Push(server.Event{
+			Type:         "usage",
+			InputTokens:  usage.Input,
+			OutputTokens: usage.Output,
+		})
+		srv.Push(server.Event{Type: "turn_done"})
+	})
+
+	srv.SetInterruptHandler(func() {
+		turnMu.Lock()
+		defer turnMu.Unlock()
+		if turnCancel != nil {
+			turnCancel()
+		}
+	})
+
+	srv.SetStateHandler(func() server.State {
+		cwd, _ := os.Getwd()
+		return server.State{
+			Repo:         cwd,
+			Provider:     providerName,
+			Model:        model,
+			MessageCount: len(a.Messages()),
+		}
+	})
+
+	if err := srv.ListenAndServe(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "serve failed: %s\n", err)
 		os.Exit(1)
 	}
 }
