@@ -52,11 +52,17 @@ type Event struct {
 	Text string `json:"text,omitempty"`
 
 	// tool_call / tool_result.
-	ID      string         `json:"id,omitempty"`
-	Name    string         `json:"name,omitempty"`
-	Summary string         `json:"summary,omitempty"`
-	Args    map[string]any `json:"args,omitempty"`
-	Output  string         `json:"output,omitempty"`
+	//
+	// Params is JSON-named "params" (not "args") to match the kinclaw
+	// kernel's event shape — same Swift struct decodes both kernels.
+	// Values are stringified (map[string]string) for the same reason:
+	// kinclaw stringifies its args at emission, frontend renders them
+	// as text labels anyway.
+	ID      string            `json:"id,omitempty"`
+	Name    string            `json:"name,omitempty"`
+	Summary string            `json:"summary,omitempty"`
+	Params  map[string]string `json:"params,omitempty"`
+	Output  string            `json:"output,omitempty"`
 
 	// usage at turn end.
 	InputTokens  int `json:"input_tokens,omitempty"`

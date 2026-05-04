@@ -283,7 +283,8 @@ func runServe(ctx context.Context, a *agent.Agent, port int, providerName, model
 			},
 			OnToolCall: func(id, name, summary string, args map[string]any) {
 				srv.Push(server.Event{
-					Type: "tool_call", ID: id, Name: name, Summary: summary, Args: args,
+					Type: "tool_call", ID: id, Name: name, Summary: summary,
+					Params: stringifyArgs(args),
 				})
 			},
 			OnToolResult: func(id, name, result string, err error) {
@@ -332,6 +333,33 @@ func runServe(ctx context.Context, a *agent.Agent, port int, providerName, model
 		fmt.Fprintf(os.Stderr, "serve failed: %s\n", err)
 		os.Exit(1)
 	}
+}
+
+// stringifyArgs flattens the agent's structured tool arguments into a
+// {string:string} map for SSE emission. Mirrors kinclaw's choice of
+// stringifying values at emission — frontends render args as text
+// labels anyway, and string-keyed-string maps decode trivially in
+// every language without per-value type narrowing.
+//
+// Strings pass through; everything else goes through fmt.Sprint, which
+// produces sensible defaults for numbers, bools, and nested types
+// (best-effort for the latter; tools rarely emit deeply-nested args).
+func stringifyArgs(args map[string]any) map[string]string {
+	if len(args) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(args))
+	for k, v := range args {
+		switch s := v.(type) {
+		case string:
+			out[k] = s
+		case nil:
+			out[k] = ""
+		default:
+			out[k] = fmt.Sprint(s)
+		}
+	}
+	return out
 }
 
 func defaultSystemPrompt() string {
