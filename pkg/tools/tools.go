@@ -1,11 +1,11 @@
-// Package tools defines the tool interface and registry for kin-code.
+// Package tools defines the tool interface and registry for kincode.
 package tools
 
 import (
 	"fmt"
 	"sync"
 
-	"github.com/LocalKinAI/kin-code/pkg/provider"
+	"github.com/LocalKinAI/kincode/pkg/provider"
 )
 
 // Tool is the interface that all tools must implement.

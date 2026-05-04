@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/LocalKinAI/kin-code/pkg/provider"
+	"github.com/LocalKinAI/kincode/pkg/provider"
 )
 
 const (

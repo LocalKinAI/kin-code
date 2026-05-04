@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/LocalKinAI/kin-code/pkg/provider"
+	"github.com/LocalKinAI/kincode/pkg/provider"
 )
 
 // FileEditTool performs find-and-replace edits in files.

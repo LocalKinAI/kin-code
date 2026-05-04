@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/LocalKinAI/kin-code/pkg/permission"
-	"github.com/LocalKinAI/kin-code/pkg/provider"
-	"github.com/LocalKinAI/kin-code/pkg/tools"
+	"github.com/LocalKinAI/kincode/pkg/permission"
+	"github.com/LocalKinAI/kincode/pkg/provider"
+	"github.com/LocalKinAI/kincode/pkg/tools"
 )
 
 // mockProvider implements provider.Provider for testing without network calls.

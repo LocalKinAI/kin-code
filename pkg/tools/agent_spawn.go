@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/LocalKinAI/kin-code/pkg/provider"
+	"github.com/LocalKinAI/kincode/pkg/provider"
 )
 
 const agentSpawnTimeout = 120 * time.Second

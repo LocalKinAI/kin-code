@@ -1,4 +1,4 @@
-// Package repl implements the interactive terminal for kin-code.
+// Package repl implements the interactive terminal for kincode.
 package repl
 
 import (
@@ -12,9 +12,9 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/LocalKinAI/kin-code/internal/mcp"
-	"github.com/LocalKinAI/kin-code/pkg/agent"
-	"github.com/LocalKinAI/kin-code/pkg/tools"
+	"github.com/LocalKinAI/kincode/internal/mcp"
+	"github.com/LocalKinAI/kincode/pkg/agent"
+	"github.com/LocalKinAI/kincode/pkg/tools"
 	"golang.org/x/term"
 )
 
@@ -66,7 +66,7 @@ type REPL struct {
 // New creates a new REPL.
 func New(a *agent.Agent, opts ...Option) *REPL {
 	homeDir, _ := os.UserHomeDir()
-	histDir := filepath.Join(homeDir, ".kin-code")
+	histDir := filepath.Join(homeDir, ".kincode")
 	_ = os.MkdirAll(histDir, 0755)
 
 	r := &REPL{
@@ -211,7 +211,7 @@ func (r *REPL) handleCommand(ctx context.Context, input string) bool {
 		fmt.Println("  /skill create <n>  — Create a new skill interactively")
 		fmt.Println("  /soul <file>       — Load a soul file mid-session")
 		fmt.Println("  /version           — Show version")
-		fmt.Println("  /quit              — Exit kin-code")
+		fmt.Println("  /quit              — Exit kincode")
 		fmt.Println()
 		fmt.Println(colorDim + "Tips:" + colorReset)
 		fmt.Println("  - Paste multi-line text directly")
@@ -251,7 +251,7 @@ func (r *REPL) handleCommand(ctx context.Context, input string) bool {
 
 	case "/memory":
 		homeDir, _ := os.UserHomeDir()
-		memPath := filepath.Join(homeDir, ".kin-code", "memory.json")
+		memPath := filepath.Join(homeDir, ".kincode", "memory.json")
 		data, err := os.ReadFile(memPath)
 		if err != nil {
 			fmt.Printf("%sMemory is empty or not found.%s\n", colorDim, colorReset)
@@ -343,7 +343,7 @@ func (r *REPL) handleCommand(ctx context.Context, input string) bool {
 		r.handleSkillCommand(parts)
 
 	case "/version":
-		fmt.Printf("kin-code v%s\n", version)
+		fmt.Printf("kincode v%s\n", version)
 
 	case "/quit", "/exit", "/q":
 		fmt.Println("Goodbye!")
@@ -407,7 +407,7 @@ func (r *REPL) handleSkillCommand(parts []string) {
 		}
 		if len(names) == 0 {
 			fmt.Printf("%sNo skills found. Create one: /skill create <name>%s\n", colorDim, colorReset)
-			fmt.Printf("%sOr copy examples from examples/skills/ to ~/.kin-code/skills/%s\n", colorDim, colorReset)
+			fmt.Printf("%sOr copy examples from examples/skills/ to ~/.kincode/skills/%s\n", colorDim, colorReset)
 			return
 		}
 		fmt.Printf("%sAvailable skills:%s\n", colorBold, colorReset)

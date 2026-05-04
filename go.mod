@@ -1,4 +1,4 @@
-module github.com/LocalKinAI/kin-code
+module github.com/LocalKinAI/kincode
 
 go 1.22
 

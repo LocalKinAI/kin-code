@@ -23,7 +23,7 @@ const (
 	authEndpoint  = "https://claude.ai/oauth/authorize"
 	tokenEndpoint = "https://platform.claude.com/v1/oauth/token"
 	clientID      = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
-	tokenDir      = ".kin-code"
+	tokenDir      = ".kincode"
 	tokenFileName = "oauth.json"
 )
 
@@ -134,7 +134,7 @@ func OAuthLogin() (*OAuthTokens, error) {
 		codeCh <- code
 		fmt.Fprint(w, `<html><body style="font-family:system-ui;text-align:center;padding:60px">
 <h2>Login successful!</h2>
-<p>You can close this tab and return to kin-code.</p>
+<p>You can close this tab and return to kincode.</p>
 </body></html>`)
 	})
 
@@ -166,7 +166,7 @@ func OAuthLogin() (*OAuthTokens, error) {
 		return nil, fmt.Errorf("saving tokens: %w", err)
 	}
 
-	fmt.Println("Login successful! Tokens saved to ~/.kin-code/oauth.json")
+	fmt.Println("Login successful! Tokens saved to ~/.kincode/oauth.json")
 	return tokens, nil
 }
 
@@ -219,14 +219,14 @@ func RefreshTokens(refreshToken string) (*OAuthTokens, error) {
 func GetValidToken() (string, error) {
 	tokens, err := LoadTokens()
 	if err != nil {
-		return "", fmt.Errorf("no saved tokens (run: kin-code -login): %w", err)
+		return "", fmt.Errorf("no saved tokens (run: kincode -login): %w", err)
 	}
 	if !tokens.isExpired() {
 		return tokens.AccessToken, nil
 	}
 	tokens, err = RefreshTokens(tokens.RefreshToken)
 	if err != nil {
-		return "", fmt.Errorf("token refresh failed (run: kin-code -login): %w", err)
+		return "", fmt.Errorf("token refresh failed (run: kincode -login): %w", err)
 	}
 	return tokens.AccessToken, nil
 }

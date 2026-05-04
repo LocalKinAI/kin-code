@@ -1,11 +1,11 @@
 package mcp
 
 import (
-	"github.com/LocalKinAI/kin-code/pkg/provider"
-	"github.com/LocalKinAI/kin-code/pkg/tools"
+	"github.com/LocalKinAI/kincode/pkg/provider"
+	"github.com/LocalKinAI/kincode/pkg/tools"
 )
 
-// MCPTool wraps an MCP server tool as a kin-code Tool.
+// MCPTool wraps an MCP server tool as a kincode Tool.
 type MCPTool struct {
 	client *Client
 	name   string
@@ -34,7 +34,7 @@ func (t *MCPTool) Execute(args map[string]any) (string, error) {
 	return t.client.CallTool(t.name, args)
 }
 
-// ToolsFromClient converts all MCP tool definitions into kin-code Tool instances.
+// ToolsFromClient converts all MCP tool definitions into kincode Tool instances.
 func ToolsFromClient(c *Client) []tools.Tool {
 	var result []tools.Tool
 	for _, td := range c.Tools() {

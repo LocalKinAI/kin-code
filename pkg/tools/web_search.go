@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/LocalKinAI/kin-code/pkg/provider"
+	"github.com/LocalKinAI/kincode/pkg/provider"
 )
 
 const (
 	webSearchTimeout   = 15 * time.Second
-	webSearchUserAgent = "kin-code/1.0"
+	webSearchUserAgent = "kincode/1.0"
 	webSearchMaxCount  = 10
 )
 

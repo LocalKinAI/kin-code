@@ -76,11 +76,11 @@ func TestMemoryList(t *testing.T) {
 func TestMemorySearch(t *testing.T) {
 	m := newTestMemory(t)
 
-	m.Execute(map[string]any{"action": "write", "key": "project", "value": "kin-code"})
+	m.Execute(map[string]any{"action": "write", "key": "project", "value": "kincode"})
 	m.Execute(map[string]any{"action": "write", "key": "hobby", "value": "coding"})
 	m.Execute(map[string]any{"action": "write", "key": "food", "value": "tacos"})
 
-	// Search for "cod" should match "kin-code" and "coding".
+	// Search for "cod" should match "kincode" and "coding".
 	out, err := m.Execute(map[string]any{
 		"action": "search",
 		"value":  "cod",
@@ -89,8 +89,8 @@ func TestMemorySearch(t *testing.T) {
 		t.Fatalf("search error: %v", err)
 	}
 
-	if !strings.Contains(out, "kin-code") {
-		t.Errorf("search should find 'kin-code', got %q", out)
+	if !strings.Contains(out, "kincode") {
+		t.Errorf("search should find 'kincode', got %q", out)
 	}
 	if !strings.Contains(out, "coding") {
 		t.Errorf("search should find 'coding', got %q", out)

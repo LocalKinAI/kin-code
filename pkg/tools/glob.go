@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/LocalKinAI/kin-code/pkg/provider"
+	"github.com/LocalKinAI/kincode/pkg/provider"
 )
 
 const maxGlobResults = 500

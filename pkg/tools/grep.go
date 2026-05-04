@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/LocalKinAI/kin-code/pkg/provider"
+	"github.com/LocalKinAI/kincode/pkg/provider"
 )
 
 const maxGrepResults = 250

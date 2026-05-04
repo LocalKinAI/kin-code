@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/LocalKinAI/kin-code/pkg/provider"
+	"github.com/LocalKinAI/kincode/pkg/provider"
 )
 
 // MemoryTool provides persistent key-value storage across sessions.
@@ -21,7 +21,7 @@ type MemoryTool struct {
 func (m *MemoryTool) Name() string { return "memory" }
 
 func (m *MemoryTool) Description() string {
-	return "Persistent memory across sessions. Store/retrieve key-value pairs in ~/.kin-code/memory.json."
+	return "Persistent memory across sessions. Store/retrieve key-value pairs in ~/.kincode/memory.json."
 }
 
 func (m *MemoryTool) Def() provider.ToolDef {
@@ -51,7 +51,7 @@ func (m *MemoryTool) memoryPath() string {
 		return m.path
 	}
 	homeDir, _ := os.UserHomeDir()
-	return filepath.Join(homeDir, ".kin-code", "memory.json")
+	return filepath.Join(homeDir, ".kincode", "memory.json")
 }
 
 func (m *MemoryTool) load() (map[string]string, error) {

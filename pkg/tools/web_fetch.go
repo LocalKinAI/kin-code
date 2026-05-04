@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/LocalKinAI/kin-code/pkg/provider"
+	"github.com/LocalKinAI/kincode/pkg/provider"
 )
 
 const (
 	webFetchTimeout    = 15 * time.Second
-	webFetchUserAgent  = "kin-code/1.0"
+	webFetchUserAgent  = "kincode/1.0"
 	webFetchMaxDefault = 10000
 )
 

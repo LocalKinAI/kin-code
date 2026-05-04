@@ -1,4 +1,4 @@
-# kin-code
+# kincode
 
 A lightweight AI coding assistant for your terminal. Written in Go. Single binary. Zero dependencies.
 
@@ -26,30 +26,30 @@ Like Claude Code, but open-source and 10x lighter.
 
 ```bash
 # Install
-go install github.com/LocalKinAI/kin-code/cmd/kin-code@latest
+go install github.com/LocalKinAI/kincode/cmd/kincode@latest
 
 # Or download binary
-curl -fsSL https://github.com/LocalKinAI/kin-code/releases/latest/download/kin-code-$(uname -s)-$(uname -m) -o kin-code
-chmod +x kin-code
+curl -fsSL https://github.com/LocalKinAI/kincode/releases/latest/download/kincode-$(uname -s)-$(uname -m) -o kincode
+chmod +x kincode
 
 # Run with Anthropic
 export ANTHROPIC_API_KEY=sk-ant-...
-kin-code
+kincode
 
 # Run with Ollama (free, local)
-kin-code -provider ollama -model qwen3:8b
+kincode -provider ollama -model qwen3:8b
 
 # Run with OpenAI
-OPENAI_API_KEY=sk-... kin-code -provider openai -model gpt-4o
+OPENAI_API_KEY=sk-... kincode -provider openai -model gpt-4o
 
 # Run with a soul file
-kin-code -soul coder.soul.md
+kincode -soul coder.soul.md
 
 # One-shot mode (non-interactive)
-kin-code "explain this codebase"
+kincode "explain this codebase"
 
 # YOLO mode (auto-approve all tool calls)
-kin-code -yolo "fix the failing tests"
+kincode -yolo "fix the failing tests"
 ```
 
 ## Claude Login (No API Key Needed)
@@ -58,13 +58,13 @@ Use your Claude account directly — works with Free, Pro, and Max:
 
 ```bash
 # First time: login via browser
-kin-code -login
+kincode -login
 
 # Then just use it (defaults to Haiku 4.5)
-kin-code
+kincode
 
 # Or specify a different model
-kin-code -model claude-sonnet-4-6
+kincode -model claude-sonnet-4-6
 ```
 
 Your session auto-refreshes. No API key needed.
@@ -126,8 +126,8 @@ When enabled, the model will show its reasoning process in dim text before the f
 ## Architecture
 
 ```
-kin-code (9MB single binary)
-├── cmd/kin-code/       # CLI entry point, flag parsing, soul loading
+kincode (9MB single binary)
+├── cmd/kincode/       # CLI entry point, flag parsing, soul loading
 ├── pkg/
 │   ├── agent/          # Core loop: message → LLM → tool calls → loop
 │   │                   # Context compaction (auto-summarize at 80%)
@@ -150,7 +150,7 @@ kin-code (9MB single binary)
 
 ## Comparison
 
-| | Claude Code | claw-code (Rust) | nano-claude-code (Python) | **kin-code (Go)** |
+| | Claude Code | claw-code (Rust) | nano-claude-code (Python) | **kincode (Go)** |
 |---|---|---|---|---|
 | Binary size | ~100MB | ~15MB | N/A (needs Python) | **9MB** |
 | Memory usage | ~150MB | ~30MB | ~80MB | **~20MB** |
@@ -192,7 +192,7 @@ cat > mcp.json << 'EOF'
 EOF
 
 # Run with MCP servers
-kin-code -mcp mcp.json
+kincode -mcp mcp.json
 
 # List connected servers and tools
 > /mcp
@@ -203,9 +203,9 @@ MCP tools are automatically registered with a `mcp_` prefix (e.g., `mcp_read_fil
 ## Build from Source
 
 ```bash
-git clone https://github.com/LocalKinAI/kin-code.git
-cd kin-code
-go build -o kin-code ./cmd/kin-code/
+git clone https://github.com/LocalKinAI/kincode.git
+cd kincode
+go build -o kincode ./cmd/kincode/
 ```
 
 ## License

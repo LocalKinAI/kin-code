@@ -142,7 +142,7 @@ func (c *Client) initialize() error {
 		ProtocolVersion: "2024-11-05",
 		Capabilities:    struct{}{},
 		ClientInfo: clientInfo{
-			Name:    "kin-code",
+			Name:    "kincode",
 			Version: "0.2.0",
 		},
 	})

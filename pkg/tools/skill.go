@@ -1,4 +1,4 @@
-// Package tools provides the skill template store for kin-code.
+// Package tools provides the skill template store for kincode.
 package tools
 
 import (
@@ -13,10 +13,10 @@ type SkillStore struct {
 	dir string
 }
 
-// NewSkillStore creates a SkillStore rooted at ~/.kin-code/skills/.
+// NewSkillStore creates a SkillStore rooted at ~/.kincode/skills/.
 func NewSkillStore() *SkillStore {
 	homeDir, _ := os.UserHomeDir()
-	dir := filepath.Join(homeDir, ".kin-code", "skills")
+	dir := filepath.Join(homeDir, ".kincode", "skills")
 	_ = os.MkdirAll(dir, 0755)
 	return &SkillStore{dir: dir}
 }

@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/LocalKinAI/kin-code/pkg/provider"
+	"github.com/LocalKinAI/kincode/pkg/provider"
 )
 
 const maxReadLines = 10000

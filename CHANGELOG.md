@@ -6,7 +6,7 @@
 - `/skill` — List available skill templates (reusable prompt patterns)
 - `/skill <name>` — Load a skill template; prepended to your next message as context
 - `/skill create <name>` — Create a new skill interactively (multi-line input)
-- Skills stored as `.md` files in `~/.kin-code/skills/`
+- Skills stored as `.md` files in `~/.kincode/skills/`
 - 5 example skills included: `code-review`, `write-tests`, `debug`, `refactor`, `explain`
 
 ### Extended Thinking
@@ -19,19 +19,19 @@
 ## [0.5.0] - 2026-04-02
 
 ### Claude OAuth Login
-- `kin-code -login` — Login via browser using your Claude account (Free/Pro/Max)
+- `kincode -login` — Login via browser using your Claude account (Free/Pro/Max)
 - Full OAuth PKCE flow: browser-based authorization, local callback server
 - Auto-refreshes expired tokens — no manual re-login needed
 - Defaults to Haiku 4.5 for OAuth sessions (included in all Claude plans)
-- Tokens saved to `~/.kin-code/oauth.json` with 0600 permissions
+- Tokens saved to `~/.kincode/oauth.json` with 0600 permissions
 - Zero API key required — just login and code
 
-**Use your Claude subscription to power kin-code. No API key needed.**
+**Use your Claude subscription to power kincode. No API key needed.**
 
 ## [0.4.0] - 2026-04-02
 
 ### Session Persistence
-- Auto-save conversation to `~/.kin-code/session.json` after each interaction
+- Auto-save conversation to `~/.kincode/session.json` after each interaction
 - Auto-restore previous session on startup (shows "[session restored: N messages]")
 - Auto-save on Ctrl+C / SIGTERM (no lost conversations)
 - `/clear` now also deletes session file for a clean start
@@ -47,7 +47,7 @@
 - Graceful degradation: failed servers log warning, don't block startup
 - Pure stdlib implementation, zero external MCP SDK
 
-**kin-code is now the only Claude Code alternative with both MCP and Soul files.**
+**kincode is now the only Claude Code alternative with both MCP and Soul files.**
 
 ## [0.2.0] - 2026-04-02
 
@@ -56,7 +56,7 @@
 **New tools (4):**
 - `web_fetch` — Fetch URL content, strip HTML, return clean text
 - `web_search` — DuckDuckGo search, zero API key required
-- `memory` — Persistent key-value store across sessions (~/.kin-code/memory.json)
+- `memory` — Persistent key-value store across sessions (~/.kincode/memory.json)
 - `agent_spawn` — Spawn sub-agent for parallel task execution
 
 **New features:**
