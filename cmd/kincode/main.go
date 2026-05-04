@@ -79,7 +79,7 @@ func main() {
 
 	// Apply soul brain config — fills in any flag the CLI didn't set
 	// explicitly. Lets a soul like Pilot (brain.provider=ollama,
-	// brain.model=kimi-k2.5:cloud) drive kincode just by passing
+	// brain.model=kimi-k2.6:cloud) drive kincode just by passing
 	// `-soul pilot.soul.md` — same shape kinclaw uses.
 	if soulFM != nil {
 		if soulFM.Brain != nil {
@@ -116,7 +116,7 @@ func main() {
 	// asked for Anthropic but has no creds available. The desktop
 	// shell (KinClaw Mac) spawns kincode with `-provider anthropic`
 	// as the default; if the user didn't set ANTHROPIC_API_KEY and
-	// hasn't OAuth'd, switching to Ollama / kimi-k2.5:cloud is the
+	// hasn't OAuth'd, switching to Ollama / kimi-k2.6:cloud is the
 	// graceful fallback — matches what kinclaw kernel uses by default
 	// (per pilot.soul.md), so kincode "just works" on the same Ollama
 	// install the user already has running for kinclaw.
@@ -126,10 +126,10 @@ func main() {
 	if *serve && *providerName == "anthropic" && key == "" {
 		if _, oauthErr := provider.GetValidToken(); oauthErr != nil {
 			fmt.Fprintln(os.Stderr,
-				"[serve] no Anthropic creds — falling back to ollama / kimi-k2.5:cloud (matches kinclaw)")
+				"[serve] no Anthropic creds — falling back to ollama / kimi-k2.6:cloud")
 			*providerName = "ollama"
 			if *model == "claude-sonnet-4-6" {
-				*model = "kimi-k2.5:cloud"
+				*model = "kimi-k2.6:cloud"
 			}
 		}
 	}
@@ -476,7 +476,7 @@ Guidelines:
 //	  - "..."
 //	brain:
 //	  provider: "ollama"
-//	  model: "kimi-k2.5:cloud"
+//	  model: "kimi-k2.6:cloud"
 //	  temperature: 0.3
 //	  context_length: 131072
 //	  endpoint: "http://localhost:11434/v1/chat/completions"

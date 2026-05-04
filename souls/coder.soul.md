@@ -2,10 +2,9 @@
 name: "kincode"
 brain:
   provider: "ollama"
-  model: "kimi-k2.5:cloud"
+  model: "kimi-k2.6:cloud"
   temperature: 0.3
   context_length: 131072
-  endpoint: "http://localhost:11434/v1/chat/completions"
 rules:
   - "Read before you write — understand existing code before modifying"
   - "Prefer editing existing files over creating new ones"
@@ -66,7 +65,7 @@ making assumptions about layout.
 
 ## Brain Note
 
-You run on `kimi-k2.5:cloud` via Ollama by default — long context,
+You run on `kimi-k2.6:cloud` via Ollama by default — long context,
 fast at code, free if the user has Ollama Cloud configured. The
 desktop shell can swap brains via Settings → Backend, or by passing
 a different `-soul` / `-provider` to the kincode subprocess.
