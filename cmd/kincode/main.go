@@ -74,25 +74,39 @@ func main() {
 			// Try OAuth token as fallback.
 			token, err := provider.GetValidToken()
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "OAuth error: %v\n\n", err)
-				fmt.Fprintln(os.Stderr, "No API key available. Either:")
-				fmt.Fprintln(os.Stderr, "  1. Run 'kincode -login' to use your Claude account")
-				fmt.Fprintln(os.Stderr, "  2. Set ANTHROPIC_API_KEY environment variable")
-				fmt.Fprintln(os.Stderr, "  3. Use -api-key flag")
-				os.Exit(1)
+				if *serve {
+					// Server mode: don't hard-exit. The server is the
+					// "always available" surface for desktop shells —
+					// boot it, let the user resolve creds via env or
+					// /api/login (future), and surface the missing-key
+					// state through chat error events on first turn.
+					fmt.Fprintf(os.Stderr, "[serve] no Anthropic key (env or OAuth); chat turns will fail until creds are added\n")
+				} else {
+					fmt.Fprintf(os.Stderr, "OAuth error: %v\n\n", err)
+					fmt.Fprintln(os.Stderr, "No API key available. Either:")
+					fmt.Fprintln(os.Stderr, "  1. Run 'kincode -login' to use your Claude account")
+					fmt.Fprintln(os.Stderr, "  2. Set ANTHROPIC_API_KEY environment variable")
+					fmt.Fprintln(os.Stderr, "  3. Use -api-key flag")
+					os.Exit(1)
+				}
+			} else {
+				key = token
+				isOAuth = true
+				// Default to Haiku 4.5 for OAuth users (included in all Claude plans).
+				if mdl == "claude-sonnet-4-6" {
+					mdl = "claude-haiku-4-5-20251001"
+				}
+				fmt.Println("Using Claude OAuth session (model: " + mdl + ")")
 			}
-			key = token
-			isOAuth = true
-			// Default to Haiku 4.5 for OAuth users (included in all Claude plans).
-			if mdl == "claude-sonnet-4-6" {
-				mdl = "claude-haiku-4-5-20251001"
-			}
-			fmt.Println("Using Claude OAuth session (model: " + mdl + ")")
 		}
 	case "openai":
 		if key == "" {
-			fmt.Fprintln(os.Stderr, "Error: OPENAI_API_KEY not set. Use -api-key or set the environment variable.")
-			os.Exit(1)
+			if *serve {
+				fmt.Fprintln(os.Stderr, "[serve] no OpenAI key; chat turns will fail until creds are added")
+			} else {
+				fmt.Fprintln(os.Stderr, "Error: OPENAI_API_KEY not set. Use -api-key or set the environment variable.")
+				os.Exit(1)
+			}
 		}
 		if mdl == "claude-sonnet-4-6" {
 			mdl = "gpt-4o" // default for OpenAI
