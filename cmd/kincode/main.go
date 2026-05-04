@@ -72,6 +72,28 @@ func main() {
 		}
 	}
 
+	// Serve-mode auto-fallback to Ollama when the user explicitly
+	// asked for Anthropic but has no creds available. The desktop
+	// shell (KinClaw Mac) spawns kincode with `-provider anthropic`
+	// as the default; if the user didn't set ANTHROPIC_API_KEY and
+	// hasn't OAuth'd, switching to Ollama / kimi-k2.5:cloud is the
+	// graceful fallback — matches what kinclaw kernel uses by default
+	// (per pilot.soul.md), so kincode "just works" on the same Ollama
+	// install the user already has running for kinclaw.
+	//
+	// Skipped when the user explicitly passed -provider on the CLI
+	// (their choice wins) or already has Anthropic creds.
+	if *serve && *providerName == "anthropic" && key == "" {
+		if _, oauthErr := provider.GetValidToken(); oauthErr != nil {
+			fmt.Fprintln(os.Stderr,
+				"[serve] no Anthropic creds — falling back to ollama / kimi-k2.5:cloud (matches kinclaw)")
+			*providerName = "ollama"
+			if *model == "claude-sonnet-4-6" {
+				*model = "kimi-k2.5:cloud"
+			}
+		}
+	}
+
 	// Set default endpoints and models per provider.
 	ep := *endpoint
 	mdl := *model
