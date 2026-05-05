@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/LocalKinAI/kincode/pkg/provider"
@@ -16,31 +17,78 @@ type SubAgentRunner interface {
 	Run(ctx context.Context, message string) (string, *provider.Usage, error)
 }
 
-// SubAgentFactory creates a new sub-agent for spawned tasks.
-type SubAgentFactory func() SubAgentRunner
+// SubAgentFactory creates a new sub-agent for spawned tasks. The
+// `personaName` parameter is "" for the legacy unnamed-spawn flow
+// (sub-agent inherits parent's system prompt) or a named persona
+// loaded from ~/.kincode/agents/<name>.md / ~/.localkin/agents/<name>.md.
+type SubAgentFactory func(personaName string) SubAgentRunner
+
+// PersonaInfo is what AgentSpawnTool needs to advertise an available
+// persona in its tool description without taking a hard dep on
+// pkg/agent (cycle prevention). main.go populates this list at boot
+// from agent.ListSubAgentPersonas().
+type PersonaInfo struct {
+	Name        string
+	Description string
+}
 
 // AgentSpawnTool spawns a sub-agent for parallel tasks.
 type AgentSpawnTool struct {
 	// Factory creates new sub-agent instances.
 	Factory SubAgentFactory
+	// Personas advertises named subagents the model can dispatch to
+	// by name. Empty list = persona dispatch disabled; the tool
+	// behaves like its pre-personas version (single `task` param).
+	Personas []PersonaInfo
 }
 
 func (a *AgentSpawnTool) Name() string { return "agent_spawn" }
 
 func (a *AgentSpawnTool) Description() string {
-	return "Spawn a sub-agent to run a task in parallel. Returns the sub-agent's response. Timeout: 120s."
+	if len(a.Personas) == 0 {
+		return "Spawn a sub-agent to run a task in parallel. Returns the sub-agent's response. Timeout: 120s."
+	}
+	// Build a rich description listing available named subagents.
+	// The parent model uses this to decide which persona (if any)
+	// to dispatch to. Omitting `agent` preserves the legacy
+	// unnamed-spawn flow (subagent inherits parent's system prompt).
+	var sb strings.Builder
+	sb.WriteString("Spawn a sub-agent to run a task. Use the `agent` param ")
+	sb.WriteString("to dispatch to a specialist persona, or omit it for a ")
+	sb.WriteString("generic subagent that inherits your system prompt. ")
+	sb.WriteString("Available personas:\n")
+	for _, p := range a.Personas {
+		fmt.Fprintf(&sb, "  • %s — %s\n", p.Name, p.Description)
+	}
+	sb.WriteString("Timeout: 120s.")
+	return sb.String()
 }
 
 func (a *AgentSpawnTool) Def() provider.ToolDef {
-	return provider.NewToolDef("agent_spawn", a.Description(), map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"task": map[string]any{
-				"type":        "string",
-				"description": "The task description for the sub-agent to execute",
-			},
+	props := map[string]any{
+		"task": map[string]any{
+			"type":        "string",
+			"description": "The task description for the sub-agent to execute",
 		},
-		"required": []string{"task"},
+	}
+	if len(a.Personas) > 0 {
+		// Surface the persona name as an enum so the model gets a
+		// validation hint. Empty/missing = generic subagent with
+		// parent's system prompt.
+		names := make([]string, 0, len(a.Personas))
+		for _, p := range a.Personas {
+			names = append(names, p.Name)
+		}
+		props["agent"] = map[string]any{
+			"type":        "string",
+			"enum":        names,
+			"description": "Optional named persona. Omit for a generic subagent.",
+		}
+	}
+	return provider.NewToolDef("agent_spawn", a.Description(), map[string]any{
+		"type":       "object",
+		"properties": props,
+		"required":   []string{"task"},
 	})
 }
 
@@ -54,7 +102,11 @@ func (a *AgentSpawnTool) Execute(args map[string]any) (string, error) {
 		return "", fmt.Errorf("no sub-agent factory configured")
 	}
 
-	subAgent := a.Factory()
+	// Optional: dispatch to a named persona. Empty/missing = legacy
+	// generic subagent (inherits parent's system prompt).
+	personaName, _ := args["agent"].(string)
+
+	subAgent := a.Factory(personaName)
 
 	ctx, cancel := context.WithTimeout(context.Background(), agentSpawnTimeout)
 	defer cancel()

@@ -90,9 +90,15 @@ func RegisterDefaults(r *Registry) {
 
 // RegisterDefaultsWithAgent registers all built-in tools including agent_spawn,
 // which requires a factory to create sub-agent instances.
-func RegisterDefaultsWithAgent(r *Registry, factory SubAgentFactory) {
+//
+// Personas (optional): if non-empty, agent_spawn advertises named
+// subagent personas in its description and tool def, letting the
+// parent model dispatch by name (agent_spawn(agent="code-reviewer", task=...)).
+// Empty list = legacy generic-spawn flow only.
+func RegisterDefaultsWithAgent(r *Registry, factory SubAgentFactory, personas ...PersonaInfo) {
 	RegisterDefaults(r)
 	r.Register(&AgentSpawnTool{
-		Factory: factory,
+		Factory:  factory,
+		Personas: personas,
 	})
 }

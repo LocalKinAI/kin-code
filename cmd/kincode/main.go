@@ -22,7 +22,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const version = "0.8.0"
+const version = "0.9.0"
 
 func main() {
 	// Subprocess hygiene: when kincode runs as a child (typically of
@@ -223,20 +223,58 @@ func main() {
 		}
 	}
 
+	// Discover named subagent personas at boot. Each .md file under
+	// ~/.kincode/agents/ or ~/.localkin/agents/ becomes a dispatchable
+	// persona that the parent model can call via:
+	//   agent_spawn(agent="code-reviewer", task="...")
+	// Without an `agent` param, agent_spawn falls back to the legacy
+	// generic-subagent flow (inherits parent's system prompt).
+	personas := agent.ListSubAgentPersonas()
+	personaInfos := make([]tools.PersonaInfo, len(personas))
+	for i, p := range personas {
+		personaInfos[i] = tools.PersonaInfo{
+			Name:        p.Name,
+			Description: p.Description,
+		}
+		fmt.Fprintf(os.Stderr, "[persona] loaded %s — %s\n", p.Name, p.Description)
+	}
+
 	// Initialize tools.
 	registry := tools.NewRegistry()
-	// Register agent_spawn with a factory that creates sub-agents.
-	tools.RegisterDefaultsWithAgent(registry, func() tools.SubAgentRunner {
+	// Register agent_spawn with a factory that creates sub-agents
+	// per call. The factory takes a persona name; "" means generic
+	// subagent (inherits parent's system prompt).
+	tools.RegisterDefaultsWithAgent(registry, func(personaName string) tools.SubAgentRunner {
 		subRegistry := tools.NewRegistry()
 		tools.RegisterDefaults(subRegistry)
+
+		// Default to parent's system prompt.
+		subPrompt := systemPrompt
+		// Persona override: load the named persona's body and use it
+		// as the sub-agent's system prompt. Failures fall through to
+		// parent's prompt — better to run the task with a generic
+		// agent than refuse outright.
+		if personaName != "" {
+			if persona, err := agent.LoadSubAgentPersona(personaName); err == nil {
+				subPrompt = persona.SystemPrompt
+				fmt.Fprintf(os.Stderr,
+					"[persona] dispatching to %q: %s\n",
+					persona.Name, persona.Path)
+			} else {
+				fmt.Fprintf(os.Stderr,
+					"[persona] %q not found (%v) — falling back to parent's prompt\n",
+					personaName, err)
+			}
+		}
+
 		return agent.New(agent.Config{
 			Provider:     p,
 			Tools:        subRegistry,
 			Permissions:  permission.New(true), // auto-approve for sub-agents
-			SystemPrompt: systemPrompt,
+			SystemPrompt: subPrompt,
 			MaxRounds:    10,
 		})
-	})
+	}, personaInfos...)
 
 	// Load external skills — same SKILL.md format kinclaw uses, so
 	// the LocalKin family shares one skill marketplace at
@@ -542,9 +580,16 @@ func buildProvider(providerName, model, apiKey, endpoint string) (provider.Provi
 // labels anyway, and string-keyed-string maps decode trivially in
 // every language without per-value type narrowing.
 //
-// Strings pass through; everything else goes through fmt.Sprint, which
-// produces sensible defaults for numbers, bools, and nested types
-// (best-effort for the latter; tools rarely emit deeply-nested args).
+// Encoding rules:
+//   - string: pass through verbatim
+//   - nil: empty string
+//   - bool / number: fmt.Sprint (compact, human-readable)
+//   - array / map / struct: JSON via json.Marshal — gives the
+//     desktop shell parseable structured data for tools that emit
+//     complex arguments (todo_write's todos array, multi_edit's
+//     edits array, etc.) instead of Go's default `[map[k:v]...]`
+//     formatting which is parseable in theory but ugly and
+//     language-specific.
 func stringifyArgs(args map[string]any) map[string]string {
 	if len(args) == 0 {
 		return nil
@@ -556,8 +601,15 @@ func stringifyArgs(args map[string]any) map[string]string {
 			out[k] = s
 		case nil:
 			out[k] = ""
-		default:
+		case bool, int, int64, float64:
 			out[k] = fmt.Sprint(s)
+		default:
+			// Arrays, maps, structs — JSON-encode for shell consumers.
+			if blob, err := json.Marshal(s); err == nil {
+				out[k] = string(blob)
+			} else {
+				out[k] = fmt.Sprint(s)
+			}
 		}
 	}
 	return out
