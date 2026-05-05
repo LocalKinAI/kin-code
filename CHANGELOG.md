@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.7.1] - 2026-05-04
+
+**First external contribution.** Tavily Search API support landed
+via [PR #1](https://github.com/LocalKinAI/kincode/pull/1) from the
+Tavily team — adds Tavily as an optional `web_search` provider
+alongside the existing DuckDuckGo path.
+
+### Added — Tavily as optional web search provider
+
+- `web_search` tool: when `TAVILY_API_KEY` env var is set, searches
+  go through `https://api.tavily.com/search` instead of DuckDuckGo
+  HTML scraping
+- DuckDuckGo path stays the default — no env var = unchanged behavior
+- Pure stdlib (`net/http` + `encoding/json`), no new dependencies
+- Refactor: DDG path extracted into `searchDDG()` method; result
+  formatting extracted into shared `formatSearchResults()` helper
+
+### Why this matters
+
+DDG HTML scraping is fragile — rate limits, occasional HTML format
+changes, no structured ranking. Tavily is purpose-built for LLM
+agents: clean text snippets, ranking scores, fewer flakes. Users
+who already pay for Tavily can just `export TAVILY_API_KEY=...` and
+get better web search; everyone else keeps the zero-config DDG
+fallback.
+
+This also marks kincode's first external contributor — within 12
+hours of v0.7.0's open-source push, Tavily's integration team
+landed a clean PR. Worth noting as a sign the rename + serve mode
++ kinclaw-mac integration is being noticed.
+
 ## [0.7.0] - 2026-05-04
 
 **Renamed `kin-code` → `kincode`** (matches the family pattern:

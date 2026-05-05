@@ -17,7 +17,7 @@ Like Claude Code, but open-source and 10x lighter.
 - Sub-agents: spawn parallel tasks with agent_spawn
 - MCP support: connect any MCP-compatible tool server
 - Persistent memory across sessions
-- Web tools: fetch URLs and search the web (DuckDuckGo, no API key)
+- Web tools: fetch URLs and search the web (DuckDuckGo by default; set `TAVILY_API_KEY` to use Tavily for LLM-tuned results)
 - Skill templates: reusable prompt patterns (/skill)
 - Extended thinking: deep reasoning mode for complex problems
 - Session persistence: auto-save/restore conversations across restarts
