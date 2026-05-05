@@ -7,10 +7,11 @@ Like Claude Code, but open-source and 10x lighter.
 ## Features
 
 - Single binary (~10MB), zero runtime dependencies
-- Multi-provider: Anthropic, OpenAI, Ollama (local models)
+- Multi-provider: Anthropic, OpenAI, Ollama (any OpenAI-compatible endpoint)
 - 10 built-in tools: bash, file read/write/edit, glob, grep, web_fetch, web_search, memory, agent_spawn
-- Permission system with tool call confirmation
-- Soul files: define custom personas and rules (.soul.md)
+- Permission system with tool call confirmation (or `-yolo` to skip)
+- **Soul files** with `brain:` config — switch persona AND provider/model per soul, kinclaw-kernel-compatible format
+- **`-serve` mode** — HTTP+SSE server for desktop shell integration (paired with [KinClaw Mac](https://github.com/LocalKinAI/kinclaw-mac) Code mode)
 - Streaming responses with markdown rendering
 - Context compaction: auto-summarizes when context gets large
 - Sub-agents: spawn parallel tasks with agent_spawn
@@ -71,21 +72,53 @@ Your session auto-refreshes. No API key needed.
 
 ## Soul Files
 
-Define custom personas with `.soul.md` files:
+Define custom personas with `.soul.md` files. Soul format is **compatible with the kinclaw kernel** — same file drives either:
 
 ```yaml
 ---
-name: "Senior Go Developer"
-temperature: 0.3
+name: "kincode"
+brain:
+  provider: "ollama"          # anthropic | openai | ollama
+  model: "kimi-k2.6:cloud"    # picks the brain when no -provider/-model on CLI
+  temperature: 0.3
+  context_length: 131072
 rules:
-  - "Always write idiomatic Go"
-  - "Prefer stdlib over external packages"
-  - "Write tests for every function"
+  - "Read before you write"
+  - "Stdlib first, deps last resort"
+  - "Don't apologize. Don't hedge."
 ---
 
-You are a senior Go developer. You write clean, efficient, well-tested code.
-Focus on simplicity and readability.
+You are kincode, a senior coding agent. Ship clean, correct, minimal code...
 ```
+
+CLI flag (`-provider` / `-model`) > soul `brain:` > legacy top-level `model:` > hardcoded default. Pass `-soul` to load:
+
+```bash
+kincode -soul ~/Documents/Workspace/kincode/souls/coder.soul.md
+```
+
+## Server Mode
+
+Run kincode as a daemon for desktop shell integration:
+
+```bash
+kincode -serve -port 5002 -soul souls/coder.soul.md
+```
+
+Exposes:
+
+| Route | Method | Purpose |
+|---|---|---|
+| `/api/health` | GET | readiness probe |
+| `/api/state` | GET | `{repo, model, provider, message_count}` |
+| `/api/repo` | POST | chdir agent into a repo: `{"path": "..."}` |
+| `/api/chat` | POST | kick a turn: `{"message": "..."}` (returns 202; output via SSE) |
+| `/api/chat` | DELETE | interrupt the in-flight turn |
+| `/api/events` | GET | SSE stream of `{type, ...}` events |
+
+Event types: `user_message`, `text_delta`, `tool_call`, `tool_result`, `turn_done`, `error`, `usage`.
+
+[KinClaw Mac](https://github.com/LocalKinAI/kinclaw-mac)'s **Code mode** drives kincode through this surface. Server mode forces `-yolo` (no permission loop over HTTP) and falls back to `ollama / kimi-k2.6:cloud` if no Anthropic creds are configured — same Ollama install kinclaw uses, no extra setup.
 
 ### Extended Thinking
 

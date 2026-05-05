@@ -1,5 +1,115 @@
 # Changelog
 
+## [0.7.0] - 2026-05-04
+
+**Renamed `kin-code` → `kincode`** (matches the family pattern:
+`kinclaw` / `kinrec` / `kinax` — all single-word, no hyphens), and
+gained a **HTTP+SSE server mode** so desktop shells (KinClaw Mac
+shipped today) can drive kincode the same way they drive the
+kinclaw kernel.
+
+### Renamed — kin-code → kincode
+
+- Module: `github.com/LocalKinAI/kin-code` → `github.com/LocalKinAI/kincode`
+- Binary: `kincode`
+- Dotdir: `~/.kincode/` (oauth, memory, sessions, skills, history)
+- `cmd/kincode/main.go` now tracked — old `.gitignore` `kin-code`
+  pattern was matching the cmd subdir recursively, so `main.go` was
+  silently never committed. Anchored to `/kincode` for binary-only
+  exclusion.
+
+### Added — `-serve` HTTP+SSE server mode
+
+Mirrors the kinclaw kernel's transport so the same desktop client
+code drives both kernels.
+
+```
+GET  /api/health                 — readiness probe
+GET  /api/state                  — {repo, model, provider, message_count}
+POST /api/repo {"path": "..."}   — chdir agent into a repo
+POST /api/chat {"message": ...}  — kick a turn (202, output via SSE)
+DELETE /api/chat                 — interrupt the in-flight turn
+GET  /api/events                 — SSE stream of events
+```
+
+Event types: `user_message`, `text_delta`, `tool_call`,
+`tool_result`, `turn_done`, `error`, `usage`. Field names aligned
+with kinclaw's event shape (`params: map[string]string` not `args`)
+so the same JSON struct decodes both kernels.
+
+Agent loop refactored: `Run` is now a thin wrapper over
+`RunWithEvents(ctx, msg, Events{...})` which routes streaming output
+through caller-supplied callbacks. REPL keeps the stdout-printing
+sink; server uses it to fan tokens into SSE. No behavior change for
+existing CLI users.
+
+Server mode forces `-yolo` (no permission prompt loop over HTTP).
+
+### Added — Soul brain config (kinclaw-compatible souls)
+
+The `soulFrontmatter` struct's `model:` and `temperature:` fields
+were parsed but **never read** in code — soul files lying about the
+brain and kincode silently ignoring it. Fixed by adopting the kinclaw
+kernel's nested `brain:` shape:
+
+```yaml
+---
+name: "kincode"
+brain:
+  provider: "ollama"
+  model: "kimi-k2.6:cloud"
+  temperature: 0.3
+  context_length: 131072
+rules: ["..."]
+---
+```
+
+Resolution precedence: CLI flag (`-provider`/`-model`) > soul
+`brain:` > soul legacy top-level `model:` > hardcoded default.
+`flag.Visit` detects which flags the user set explicitly so the
+soul fills in the rest.
+
+This is the **second layer of unification** with the kinclaw kernel:
+- Stage 4a aligned the SSE wire format
+- Stage 7 (this) aligned the soul format
+
+Same `pilot.soul.md` now drives either kernel:
+```bash
+kinclaw  serve  -soul souls/pilot.soul.md   # 5-claw computer-use
+kincode  -serve -soul souls/pilot.soul.md   # repo-aware coding
+```
+
+### Added — `souls/coder.soul.md` canonical default soul
+
+Promotes `examples/coder.soul.md` to a real `souls/` location with a
+brain block (`ollama / kimi-k2.6:cloud`, no hardcoded endpoint —
+inherits ollama's local default). Layout matches the kinclaw kernel:
+`souls/<name>.soul.md` at repo root.
+
+### Added — Auto-fallback to ollama when no Anthropic creds
+
+In `-serve` mode, when `-provider` is the default (anthropic) and
+neither `ANTHROPIC_API_KEY` nor `~/.kincode/oauth.json` is present,
+auto-switch to `ollama / kimi-k2.6:cloud`. Lets KinClaw Mac launch
+kincode cold without requiring API key setup; users with Ollama
+already configured (which they likely are if they're running
+kinclaw) get a working coding agent immediately.
+
+### Added — Subprocess hygiene
+
+`startOrphanWatch()` at boot polls `os.Getppid()` every 2s. If the
+parent process dies, kincode self-exits instead of being reparented
+to launchd. Eliminates the "ghost subprocess holding port :5002"
+problem when the desktop shell gets `kill -9`'d.
+
+### Changed — `-serve` doesn't hard-exit on missing API key
+
+CLI/REPL behavior unchanged (still prints "no API key, run -login"
+and exits). But in `-serve` mode the HTTP server boots regardless;
+chat turns return an `error` SSE event when keys are still missing.
+This lets the desktop shell render the failure state in the UI
+instead of having the supervisor see exit code 1 and assume crash.
+
 ## [0.6.0] - 2026-04-02
 
 ### Skill Templates
