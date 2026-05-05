@@ -1,11 +1,14 @@
 package tools
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -19,13 +22,14 @@ const (
 	webSearchMaxCount  = 10
 )
 
-// WebSearchTool performs web searches using DuckDuckGo HTML.
+// WebSearchTool performs web searches using Tavily (when TAVILY_API_KEY is set)
+// or DuckDuckGo HTML scraping as the default fallback.
 type WebSearchTool struct{}
 
 func (w *WebSearchTool) Name() string { return "web_search" }
 
 func (w *WebSearchTool) Description() string {
-	return "Search the web using DuckDuckGo. Returns titles, URLs, and snippets. No API key needed."
+	return "Search the web. Uses Tavily when TAVILY_API_KEY is set, otherwise DuckDuckGo. Returns titles, URLs, and snippets."
 }
 
 func (w *WebSearchTool) Def() provider.ToolDef {
@@ -99,6 +103,70 @@ func parseDDGResults(html string, count int) []searchResult {
 	return results
 }
 
+// tavilySearchRequest is the request body for the Tavily Search API.
+type tavilySearchRequest struct {
+	Query      string `json:"query"`
+	MaxResults int    `json:"max_results"`
+	APIKey     string `json:"api_key"`
+}
+
+// tavilySearchResponse is the response from the Tavily Search API.
+type tavilySearchResponse struct {
+	Results []tavilyResult `json:"results"`
+}
+
+type tavilyResult struct {
+	Title   string  `json:"title"`
+	URL     string  `json:"url"`
+	Content string  `json:"content"`
+	Score   float64 `json:"score"`
+}
+
+// searchTavily calls the Tavily Search API and returns results.
+func searchTavily(ctx context.Context, apiKey, query string, count int) ([]searchResult, error) {
+	reqBody := tavilySearchRequest{
+		Query:      query,
+		MaxResults: count,
+		APIKey:     apiKey,
+	}
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("marshal tavily request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.tavily.com/search", bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("create tavily request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("tavily search failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, fmt.Errorf("tavily API error (status %d): %s", resp.StatusCode, string(respBody))
+	}
+
+	var tavilyResp tavilySearchResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tavilyResp); err != nil {
+		return nil, fmt.Errorf("decode tavily response: %w", err)
+	}
+
+	results := make([]searchResult, 0, len(tavilyResp.Results))
+	for _, r := range tavilyResp.Results {
+		results = append(results, searchResult{
+			title:   r.Title,
+			url:     r.URL,
+			snippet: r.Content,
+		})
+	}
+	return results, nil
+}
+
 func (w *WebSearchTool) Execute(args map[string]any) (string, error) {
 	query, ok := args["query"].(string)
 	if !ok || query == "" {
@@ -113,10 +181,24 @@ func (w *WebSearchTool) Execute(args map[string]any) (string, error) {
 		}
 	}
 
-	searchURL := "https://html.duckduckgo.com/html/?q=" + url.QueryEscape(query)
-
 	ctx, cancel := context.WithTimeout(context.Background(), webSearchTimeout)
 	defer cancel()
+
+	// Use Tavily if API key is configured, otherwise fall back to DuckDuckGo.
+	if apiKey := os.Getenv("TAVILY_API_KEY"); apiKey != "" {
+		results, err := searchTavily(ctx, apiKey, query, count)
+		if err != nil {
+			return "", err
+		}
+		return formatSearchResults(results), nil
+	}
+
+	return w.searchDDG(ctx, query, count)
+}
+
+// searchDDG performs a web search using DuckDuckGo HTML scraping.
+func (w *WebSearchTool) searchDDG(ctx context.Context, query string, count int) (string, error) {
+	searchURL := "https://html.duckduckgo.com/html/?q=" + url.QueryEscape(query)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
 	if err != nil {
@@ -147,6 +229,11 @@ func (w *WebSearchTool) Execute(args map[string]any) (string, error) {
 		return fmt.Sprintf("No structured results found. Raw text:\n%s", text), nil
 	}
 
+	return formatSearchResults(results), nil
+}
+
+// formatSearchResults formats a slice of searchResult into a numbered text list.
+func formatSearchResults(results []searchResult) string {
 	var sb strings.Builder
 	for i, r := range results {
 		fmt.Fprintf(&sb, "%d. %s\n   %s\n", i+1, r.title, r.url)
@@ -155,6 +242,5 @@ func (w *WebSearchTool) Execute(args map[string]any) (string, error) {
 		}
 		sb.WriteString("\n")
 	}
-
-	return sb.String(), nil
+	return sb.String()
 }
