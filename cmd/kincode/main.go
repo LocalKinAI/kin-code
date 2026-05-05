@@ -496,7 +496,22 @@ func runServe(ctx context.Context, a *agent.Agent, port int, providerName, model
 			Provider:     prov,
 			Model:        mdl,
 			MessageCount: len(a.Messages()),
+			PlanMode:     a.PlanMode(),
 		}
+	})
+
+	srv.SetPlanModeHandler(func(enabled bool) bool {
+		// Cancel any in-flight turn — flipping the gate mid-loop
+		// would leave the model confused (allowed write tool half a
+		// second ago, denied now). Match handleClear's semantics.
+		turnMu.Lock()
+		if turnCancel != nil {
+			turnCancel()
+		}
+		turnMu.Unlock()
+
+		a.SetPlanMode(enabled)
+		return a.PlanMode()
 	})
 
 	if err := srv.ListenAndServe(ctx); err != nil {

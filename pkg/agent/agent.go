@@ -274,6 +274,34 @@ func (a *Agent) RunWithEvents(ctx context.Context, userMessage string, ev Events
 	return a.RunWithImagesAndEvents(ctx, userMessage, nil, ev)
 }
 
+// SetPlanMode toggles plan mode on the underlying permission manager.
+// Lets the server flip the gate live (POST /api/plan_mode) without
+// reconstructing the agent.
+func (a *Agent) SetPlanMode(enabled bool) {
+	if a.permissions != nil {
+		a.permissions.SetPlanMode(enabled)
+	}
+}
+
+// PlanMode reports the current plan-mode state. Used by /api/state.
+func (a *Agent) PlanMode() bool {
+	if a.permissions == nil {
+		return false
+	}
+	return a.permissions.PlanMode()
+}
+
+// planModeDirective is prepended to every user message while plan
+// mode is on. It teaches the model the rules in addition to the
+// hard enforcement at CheckPlanMode time — a model that only sees
+// "tool denied" errors might thrash; a model that sees the directive
+// up front knows to plan rather than execute.
+const planModeDirective = "[PLAN MODE — read-only tools only " +
+	"(file_read, glob, grep, web_fetch, web_search). " +
+	"Investigate as needed, then end your response with a clear " +
+	"markdown plan for the user to approve. Do NOT modify files, " +
+	"run bash, or spawn sub-agents.]\n\n"
+
 // RunWithImagesAndEvents is the multimodal version of RunWithEvents:
 // the user message can include attached images. Each Attachment is
 // translated to a provider.ContentBlock and the message is sent as
@@ -285,6 +313,13 @@ func (a *Agent) RunWithEvents(ctx context.Context, userMessage string, ev Events
 // at the provider level — kincode doesn't pre-validate the model
 // since the list of vision-capable models is moving target.
 func (a *Agent) RunWithImagesAndEvents(ctx context.Context, userMessage string, images []Attachment, ev Events) (string, *provider.Usage, error) {
+	// Plan-mode prepend. Done at message-construction time (not as
+	// a separate system message) so the directive ages out naturally
+	// with conversation compaction — same way Claude Code does it.
+	if a.PlanMode() {
+		userMessage = planModeDirective + userMessage
+	}
+
 	userMsg := provider.Message{
 		Role:    "user",
 		Content: userMessage,
@@ -371,6 +406,15 @@ func (a *Agent) executeTool(tc provider.ToolCall) (string, error) {
 	var args map[string]any
 	if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
 		return "", fmt.Errorf("parse tool arguments: %w", err)
+	}
+
+	// Plan mode gate: when on, deny non-read-only tools with an
+	// error shaped to teach the model to pivot to a read-only tool
+	// or finish with a markdown plan. Returning the error as a tool
+	// result (vs. a hard agent error) lets the model see the denial
+	// and self-correct in the same turn.
+	if err := a.permissions.CheckPlanMode(tc.Function.Name); err != nil {
+		return "", err
 	}
 
 	// Permission check for bash commands.

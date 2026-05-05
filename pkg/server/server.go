@@ -74,6 +74,11 @@ type Event struct {
 	// the UI render "📎 N images" alongside the user text bubble.
 	ImageCount int `json:"image_count,omitempty"`
 
+	// plan_mode events broadcast the toggle state so multi-window
+	// UIs sync. omitempty would drop `false`, so we emit the bool
+	// directly and let UIs key off Type=="plan_mode".
+	PlanMode bool `json:"plan_mode,omitempty"`
+
 	// error / status hints.
 	Message string `json:"message,omitempty"`
 }
@@ -105,6 +110,7 @@ type State struct {
 	Model        string `json:"model,omitempty"`
 	Provider     string `json:"provider,omitempty"`
 	MessageCount int    `json:"message_count"`
+	PlanMode     bool   `json:"plan_mode"`
 }
 
 // StateHandler returns the agent's current state. Server caches
@@ -148,6 +154,7 @@ type Server struct {
 	clearHandler     ClearHandler
 	brainHandler     BrainSwitchHandler
 	stateHandler     StateHandler
+	planModeHandler  PlanModeHandler
 
 	mu   sync.Mutex
 	subs map[chan Event]struct{}
@@ -183,6 +190,16 @@ func (s *Server) SetBrainSwitchHandler(h BrainSwitchHandler) { s.brainHandler = 
 // SetStateHandler wires GET /api/state. Without it the endpoint
 // returns an empty State{} (UI shows zero counts / no repo).
 func (s *Server) SetStateHandler(h StateHandler) { s.stateHandler = h }
+
+// PlanModeHandler is invoked when POST /api/plan_mode fires. The
+// handler should toggle the agent's plan-mode state and return the
+// new state so the UI can confirm the switch took effect (round-
+// trip the bool rather than trusting the request value).
+type PlanModeHandler func(enabled bool) (newState bool)
+
+// SetPlanModeHandler wires POST /api/plan_mode. Without it the
+// endpoint returns 501 — UI's plan-mode toggle has no effect.
+func (s *Server) SetPlanModeHandler(h PlanModeHandler) { s.planModeHandler = h }
 
 // Push fans an event out to every subscriber non-blockingly. Slow
 // browsers/clients drop events past their 64-deep buffer rather than
@@ -223,6 +240,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux.HandleFunc("/api/chat", s.handleChat)
 	mux.HandleFunc("/api/clear", s.handleClear)
 	mux.HandleFunc("/api/brain", s.handleBrain)
+	mux.HandleFunc("/api/plan_mode", s.handlePlanMode)
 	mux.HandleFunc("/api/events", s.handleEvents)
 
 	listener, err := net.Listen("tcp", s.addr)
@@ -425,6 +443,39 @@ func (s *Server) handleClear(w http.ResponseWriter, r *http.Request) {
 	}
 	s.clearHandler()
 	w.WriteHeader(http.StatusAccepted)
+}
+
+// handlePlanMode flips the agent's plan-mode flag. Body:
+// {"enabled": true|false}. Returns the post-toggle state — UI uses
+// the round-tripped bool to confirm rather than trusting the
+// request value (handler may decide to refuse e.g. mid-turn).
+//
+// Plan mode is "describe what you'd do without doing it" — read-only
+// tools allowed, write/exec/spawn denied with a message that teaches
+// the model to emit a markdown plan instead.
+func (s *Server) handlePlanMode(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.planModeHandler == nil {
+		http.Error(w, "plan_mode not wired", http.StatusNotImplemented)
+		return
+	}
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	newState := s.planModeHandler(body.Enabled)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]bool{"enabled": newState})
+
+	// Also broadcast over SSE so any other connected UI (e.g. a
+	// second window) updates. Frontend listens for type:plan_mode.
+	s.Push(Event{Type: "plan_mode", PlanMode: newState})
 }
 
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {

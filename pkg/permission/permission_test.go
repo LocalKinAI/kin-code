@@ -56,3 +56,43 @@ func TestSafeCommandsAllowed(t *testing.T) {
 		}
 	}
 }
+
+func TestPlanModeOff_AllowsEverything(t *testing.T) {
+	m := New(true)
+	// With plan mode disabled, even write tools pass the check.
+	for _, tool := range []string{"file_write", "file_edit", "bash", "agent_spawn", "file_read"} {
+		if err := m.CheckPlanMode(tool); err != nil {
+			t.Errorf("plan-mode-off should allow %q, got %v", tool, err)
+		}
+	}
+}
+
+func TestPlanModeOn_AllowsReadOnlyDeniesWrite(t *testing.T) {
+	m := New(true)
+	m.SetPlanMode(true)
+	if !m.PlanMode() {
+		t.Fatal("PlanMode() should report true after SetPlanMode(true)")
+	}
+
+	allowed := []string{"file_read", "glob", "grep", "web_fetch", "web_search"}
+	for _, tool := range allowed {
+		if err := m.CheckPlanMode(tool); err != nil {
+			t.Errorf("plan mode should allow %q, got %v", tool, err)
+		}
+	}
+
+	denied := []string{"file_write", "file_edit", "multi_edit", "bash",
+		"agent_spawn", "todo_write", "memory"}
+	for _, tool := range denied {
+		err := m.CheckPlanMode(tool)
+		if err == nil {
+			t.Errorf("plan mode should deny %q, got nil", tool)
+		}
+	}
+
+	// Toggling off restores normal behavior.
+	m.SetPlanMode(false)
+	if err := m.CheckPlanMode("bash"); err != nil {
+		t.Errorf("plan-mode-off should re-allow bash, got %v", err)
+	}
+}

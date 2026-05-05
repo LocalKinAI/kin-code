@@ -11,8 +11,23 @@ import (
 // Manager controls whether tool calls require user confirmation.
 type Manager struct {
 	yolo      bool
+	planMode  bool
 	reader    *bufio.Reader
 	blocklist []string
+}
+
+// readOnlyToolsForPlanMode is the allowlist of tool names the agent
+// may invoke while plan mode is on. Anything else (bash, file_write,
+// file_edit, multi_edit, agent_spawn, todo_write, memory) is denied
+// at the permission layer with a planmode-specific error so the
+// model knows to stay in research/planning mode and emit a markdown
+// plan instead of starting to modify.
+var readOnlyToolsForPlanMode = map[string]bool{
+	"file_read":  true,
+	"glob":       true,
+	"grep":       true,
+	"web_fetch":  true,
+	"web_search": true,
 }
 
 // New creates a permission manager.
@@ -34,6 +49,36 @@ func New(yolo bool) *Manager {
 			"wget | sh",
 		},
 	}
+}
+
+// SetPlanMode toggles plan mode. While enabled, tool calls outside
+// the read-only allowlist are denied at CheckPlanMode time — the
+// agent loop surfaces the denial as a tool error to the model, which
+// learns to switch to "describe what you'd do" instead of doing it.
+func (m *Manager) SetPlanMode(enabled bool) { m.planMode = enabled }
+
+// PlanMode returns the current plan-mode state. Used by the server
+// to report status on /api/state.
+func (m *Manager) PlanMode() bool { return m.planMode }
+
+// CheckPlanMode returns an error if plan mode is on and the named
+// tool isn't in the read-only allowlist. The error text is shaped
+// for the model — it includes the allowlist so the model can pivot
+// to a tool it CAN use rather than guess.
+func (m *Manager) CheckPlanMode(toolName string) error {
+	if !m.planMode {
+		return nil
+	}
+	if readOnlyToolsForPlanMode[toolName] {
+		return nil
+	}
+	return fmt.Errorf(
+		"PLAN MODE: %q is not allowed while planning. "+
+			"You may only use read-only tools "+
+			"(file_read, glob, grep, web_fetch, web_search). "+
+			"Finish your investigation, then end your response with a "+
+			"clear markdown plan for the user to approve",
+		toolName)
 }
 
 // CheckBash checks if a bash command is allowed. Returns an error if blocked.
