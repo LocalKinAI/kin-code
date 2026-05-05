@@ -22,7 +22,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const version = "0.9.0"
+const version = "0.10.0"
 
 func main() {
 	// Subprocess hygiene: when kincode runs as a child (typically of
