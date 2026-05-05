@@ -238,6 +238,17 @@ func main() {
 		})
 	})
 
+	// Load external skills — same SKILL.md format kinclaw uses, so
+	// the LocalKin family shares one skill marketplace at
+	// ~/.localkin/skills/. kincode-specific overrides at
+	// ~/.kincode/skills/. Each skill becomes a regular tool the
+	// agent can invoke alongside the 10 builtins.
+	for _, skill := range tools.LoadAllExternalSkills() {
+		registry.Register(skill)
+		fmt.Fprintf(os.Stderr, "[skill] loaded %s — %s\n",
+			skill.Name(), skill.Description())
+	}
+
 	// Load MCP servers if config provided.
 	var mcpClients []*mcp.Client
 	if *mcpConfig != "" {
@@ -259,6 +270,17 @@ func main() {
 		yoloEffective = true
 	}
 	perms := permission.New(yoloEffective)
+
+	// Project memory — load KINCODE.md / CLAUDE.md from cwd (walks
+	// up parent dirs) and append to the system prompt. Same pattern
+	// as Claude Code's CLAUDE.md auto-inject; KINCODE.md takes
+	// priority for kincode-specific overrides. Re-read on every
+	// boot so editing the file then relaunching kincode picks it up.
+	if memory := agent.LoadProjectMemory(""); memory != "" {
+		systemPrompt += agent.FormatProjectMemory(memory)
+		fmt.Fprintf(os.Stderr, "[memory] loaded %d chars from project memory\n",
+			len(memory))
+	}
 
 	// Create agent.
 	a := agent.New(agent.Config{

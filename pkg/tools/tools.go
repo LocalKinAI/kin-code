@@ -79,11 +79,13 @@ func RegisterDefaults(r *Registry) {
 	r.Register(&FileReadTool{})
 	r.Register(&FileWriteTool{})
 	r.Register(&FileEditTool{})
+	r.Register(&MultiEditTool{})
 	r.Register(&GlobTool{})
 	r.Register(&GrepTool{})
 	r.Register(&WebFetchTool{})
 	r.Register(&WebSearchTool{})
 	r.Register(&MemoryTool{})
+	r.Register(&TodoWriteTool{})
 }
 
 // RegisterDefaultsWithAgent registers all built-in tools including agent_spawn,
