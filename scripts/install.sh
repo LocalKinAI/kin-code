@@ -24,12 +24,18 @@ cd "$REPO_DIR"
 go build -o kincode ./cmd/kincode/
 
 echo "==> Ad-hoc codesigning (identifier: $IDENTIFIER)..."
-codesign --force --sign - --identifier "$IDENTIFIER" --options=runtime ./kincode
+# No --options=runtime: hardened runtime enables library validation,
+# which rejects ad-hoc-signed dylibs because their synthetic Team IDs
+# differ from the host's. We can't notarize ad-hoc anyway (needs $99
+# Apple cert, deferred to M6) so hardened runtime gains nothing and
+# breaks future dlopen-using code paths. Same fix applies in
+# kinclaw/scripts/install.sh — see that file for the full rationale.
+codesign --force --sign - --identifier "$IDENTIFIER" ./kincode
 
 echo "==> Installing to $INSTALL_PATH..."
 mkdir -p "$INSTALL_DIR"
 cp ./kincode "$INSTALL_PATH"
-codesign --force --sign - --identifier "$IDENTIFIER" --options=runtime "$INSTALL_PATH"
+codesign --force --sign - --identifier "$IDENTIFIER" "$INSTALL_PATH"
 
 echo
 echo "✓ Installed: $INSTALL_PATH"
