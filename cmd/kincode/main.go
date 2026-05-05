@@ -308,10 +308,17 @@ func main() {
 func runServe(ctx context.Context, a *agent.Agent, port int, providerName, model string) {
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 
+	// currentBrain captures the active provider+model. Mutated by the
+	// brain switch handler so /api/state always reports the live
+	// values, not the boot-time ones. Behind brainMu since stateHandler
+	// reads on /api/state's request goroutine.
 	var (
-		turnMu     sync.Mutex
-		turnCancel context.CancelFunc
-		srv        *server.Server // declared up-front so the chat handler closure can reference it
+		turnMu      sync.Mutex
+		turnCancel  context.CancelFunc
+		brainMu     sync.Mutex
+		curProvider = providerName
+		curModel    = model
+		srv         *server.Server // declared up-front so the chat handler closure can reference it
 	)
 
 	srv = server.New(addr, func(_ context.Context, message string) {
@@ -386,12 +393,34 @@ func runServe(ctx context.Context, a *agent.Agent, port int, providerName, model
 		a.Clear()
 	})
 
+	srv.SetBrainSwitchHandler(func(req server.BrainSwitchRequest) error {
+		// Build a new provider object using the same logic the boot
+		// path uses. Failures (e.g. anthropic without a key) bubble
+		// up as 400 to the caller — the server doesn't enter a
+		// half-broken state.
+		p, err := buildProvider(req.Provider, req.Model, req.APIKey, req.Endpoint)
+		if err != nil {
+			return err
+		}
+		a.SetProvider(p)
+		brainMu.Lock()
+		curProvider = req.Provider
+		curModel = req.Model
+		brainMu.Unlock()
+		fmt.Fprintf(os.Stderr, "[serve] brain switched to %s / %s\n",
+			req.Provider, req.Model)
+		return nil
+	})
+
 	srv.SetStateHandler(func() server.State {
 		cwd, _ := os.Getwd()
+		brainMu.Lock()
+		prov, mdl := curProvider, curModel
+		brainMu.Unlock()
 		return server.State{
 			Repo:         cwd,
-			Provider:     providerName,
-			Model:        model,
+			Provider:     prov,
+			Model:        mdl,
 			MessageCount: len(a.Messages()),
 		}
 	})
@@ -428,6 +457,61 @@ func startOrphanWatch() {
 			}
 		}
 	}()
+}
+
+// buildProvider constructs a provider.Provider from a desired
+// (provider, model, api_key, endpoint) combo — same logic the boot
+// path uses, factored out so the live brain-switch endpoint can
+// share it. Returns a useful error for the UI to surface (e.g.
+// "anthropic API key required") rather than a half-built provider.
+//
+// Resolution: explicit apiKey/endpoint > matching env var > per-
+// provider default. anthropic without a key falls back to OAuth
+// (~/.kincode/oauth.json) before erroring; if neither works, hard
+// error so the UI can prompt for creds instead of silently 401-ing
+// every turn.
+func buildProvider(providerName, model, apiKey, endpoint string) (provider.Provider, error) {
+	switch providerName {
+	case "anthropic":
+		key := apiKey
+		isOAuth := false
+		if key == "" {
+			key = os.Getenv("ANTHROPIC_API_KEY")
+		}
+		if key == "" {
+			token, err := provider.GetValidToken()
+			if err != nil {
+				return nil, fmt.Errorf("anthropic: no API key (set ANTHROPIC_API_KEY, run kincode -login, or pass api_key in body)")
+			}
+			key = token
+			isOAuth = true
+		}
+		ap := provider.NewAnthropic(key, model)
+		if isOAuth {
+			ap.SetOAuth(true)
+		}
+		return ap, nil
+	case "openai":
+		key := apiKey
+		if key == "" {
+			key = os.Getenv("OPENAI_API_KEY")
+		}
+		if key == "" {
+			return nil, fmt.Errorf("openai: no API key (set OPENAI_API_KEY or pass api_key in body)")
+		}
+		ep := endpoint
+		return provider.NewOpenAI(key, model, ep), nil
+	case "ollama":
+		ep := endpoint
+		if ep == "" {
+			ep = "http://localhost:11434/v1/chat/completions"
+		}
+		// Ollama doesn't need a key, but the openai client wants
+		// non-empty — pass any string ("ollama" by convention).
+		return provider.NewOpenAI("ollama", model, ep), nil
+	default:
+		return nil, fmt.Errorf("unknown provider %q (use anthropic, openai, or ollama)", providerName)
+	}
 }
 
 // stringifyArgs flattens the agent's structured tool arguments into a

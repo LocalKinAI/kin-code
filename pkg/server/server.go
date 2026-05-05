@@ -102,12 +102,31 @@ type InterruptHandler func()
 // kincode subprocess.
 type ClearHandler func()
 
+// BrainSwitchRequest is the body of POST /api/brain. APIKey and
+// Endpoint are optional — if omitted, the server reads from env
+// (ANTHROPIC_API_KEY / OPENAI_API_KEY) and per-provider defaults.
+type BrainSwitchRequest struct {
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+	APIKey   string `json:"api_key,omitempty"`
+	Endpoint string `json:"endpoint,omitempty"`
+}
+
+// BrainSwitchHandler swaps the running agent's provider/model. Should
+// build a new provider object using the same logic the boot path
+// uses, then call agent.SetProvider. Returns an error if the new
+// config is invalid (e.g. anthropic without a key) so the UI can
+// surface "couldn't switch — check API key" without entering a
+// half-broken state.
+type BrainSwitchHandler func(req BrainSwitchRequest) error
+
 // Server owns the HTTP listener + SSE subscriber map.
 type Server struct {
 	addr             string
 	chatHandler      ChatHandler
 	interruptHandler InterruptHandler
 	clearHandler     ClearHandler
+	brainHandler     BrainSwitchHandler
 	stateHandler     StateHandler
 
 	mu   sync.Mutex
@@ -135,6 +154,11 @@ func (s *Server) SetInterruptHandler(h InterruptHandler) { s.interruptHandler = 
 // returns 501 — UI's "new session" button can only clear local
 // state, not the agent's server-side message history.
 func (s *Server) SetClearHandler(h ClearHandler) { s.clearHandler = h }
+
+// SetBrainSwitchHandler wires POST /api/brain. Without it the
+// endpoint returns 501 — UI's brain dropdown will fail with a
+// clear "not wired" error.
+func (s *Server) SetBrainSwitchHandler(h BrainSwitchHandler) { s.brainHandler = h }
 
 // SetStateHandler wires GET /api/state. Without it the endpoint
 // returns an empty State{} (UI shows zero counts / no repo).
@@ -178,6 +202,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux.HandleFunc("/api/repo", s.handleRepo)
 	mux.HandleFunc("/api/chat", s.handleChat)
 	mux.HandleFunc("/api/clear", s.handleClear)
+	mux.HandleFunc("/api/brain", s.handleBrain)
 	mux.HandleFunc("/api/events", s.handleEvents)
 
 	listener, err := net.Listen("tcp", s.addr)
@@ -307,6 +332,46 @@ func (s *Server) handleChatDelete(w http.ResponseWriter, _ *http.Request) {
 	}
 	s.interruptHandler()
 	w.WriteHeader(http.StatusAccepted)
+}
+
+// handleBrain swaps the running agent's provider/model live. Body:
+// {provider, model, api_key?, endpoint?}. On success returns 202
+// + the post-switch state JSON; on failure returns the error from
+// the brain handler (e.g. "anthropic API key required") with 400.
+//
+// Cancels any in-flight turn first — same reason as handleClear:
+// swapping providers mid-iteration would race against the agent's
+// Stream call.
+func (s *Server) handleBrain(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.brainHandler == nil {
+		http.Error(w, "brain switch not wired", http.StatusNotImplemented)
+		return
+	}
+	var req BrainSwitchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.Provider == "" || req.Model == "" {
+		http.Error(w, "provider and model required", http.StatusBadRequest)
+		return
+	}
+	if s.interruptHandler != nil {
+		s.interruptHandler()
+	}
+	if err := s.brainHandler(req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	if s.stateHandler != nil {
+		_ = json.NewEncoder(w).Encode(s.stateHandler())
+	}
 }
 
 // handleClear resets the agent's conversation memory back to a fresh
