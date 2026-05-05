@@ -51,11 +51,32 @@ type openaiRequest struct {
 	Stream   bool            `json:"stream,omitempty"`
 }
 
+// openaiMessage uses `any` for Content so it can be either a plain
+// string (text-only, the common case) or a list of content parts
+// (multimodal — text + image_url parts). The Chat Completions API
+// accepts both shapes; we keep the string path for backward compat
+// with non-multimodal models like Ollama-hosted code-llama.
 type openaiMessage struct {
 	Role       string     `json:"role"`
-	Content    string     `json:"content,omitempty"`
+	Content    any        `json:"content,omitempty"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
+}
+
+// openaiContentPart is one element in a multimodal user message's
+// content list. Type ∈ {"text", "image_url"}.
+//
+// Image format follows OpenAI's data-URL convention:
+//
+//	{"type":"image_url","image_url":{"url":"data:image/png;base64,..."}}
+type openaiContentPart struct {
+	Type     string             `json:"type"`
+	Text     string             `json:"text,omitempty"`
+	ImageURL *openaiImageURLRef `json:"image_url,omitempty"`
+}
+
+type openaiImageURLRef struct {
+	URL string `json:"url"`
 }
 
 type openaiResponse struct {
@@ -104,16 +125,45 @@ func (o *OpenAIProvider) Stream(ctx context.Context, messages []Message, tools [
 }
 
 func (o *OpenAIProvider) doRequest(ctx context.Context, messages []Message, tools []ToolDef, stream bool, onChunk func(string)) (*Response, error) {
-	// Convert messages to OpenAI format.
+	// Convert messages to OpenAI format. Most messages are text-only
+	// and pass through with Content as a string. Messages with image
+	// blocks get translated to the multimodal content-parts list.
 	var oMsgs []openaiMessage
 	for _, m := range messages {
 		om := openaiMessage{
 			Role:       m.Role,
-			Content:    m.Content,
 			ToolCallID: m.ToolCallID,
 		}
 		if len(m.ToolCalls) > 0 {
 			om.ToolCalls = m.ToolCalls
+		}
+		if len(m.Blocks) > 0 {
+			// Multimodal: build a content-parts list. Text content
+			// (if any) becomes the leading text part so callers can
+			// pass a caption + images without manual wrapping.
+			var parts []openaiContentPart
+			if m.Content != "" {
+				parts = append(parts, openaiContentPart{Type: "text", Text: m.Content})
+			}
+			for _, b := range m.Blocks {
+				switch b.Type {
+				case "text":
+					parts = append(parts, openaiContentPart{Type: "text", Text: b.Text})
+				case "image":
+					parts = append(parts, openaiContentPart{
+						Type: "image_url",
+						ImageURL: &openaiImageURLRef{
+							URL: fmt.Sprintf("data:%s;base64,%s",
+								b.ImageMediaType, b.ImageBase64),
+						},
+					})
+				}
+				// Unknown block kinds dropped — see anthropic provider
+				// for the same reasoning.
+			}
+			om.Content = parts
+		} else {
+			om.Content = m.Content
 		}
 		oMsgs = append(oMsgs, om)
 	}

@@ -62,6 +62,70 @@ func TestMessageWithToolCallsJSON(t *testing.T) {
 	}
 }
 
+func TestMultimodalMessageBlocks(t *testing.T) {
+	// A user turn with a caption + one image. Shape we expect callers
+	// (server/agent) to construct.
+	msg := Message{
+		Role:    "user",
+		Content: "What's in this picture?",
+		Blocks: []ContentBlock{
+			ImageBlock("image/png", "iVBORw0KGgoAAAA..."),
+		},
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+
+	var got Message
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+
+	if got.Content != msg.Content {
+		t.Errorf("Content: expected %q, got %q", msg.Content, got.Content)
+	}
+	if len(got.Blocks) != 1 {
+		t.Fatalf("expected 1 block, got %d", len(got.Blocks))
+	}
+	b := got.Blocks[0]
+	if b.Type != "image" {
+		t.Errorf("Block.Type: expected %q, got %q", "image", b.Type)
+	}
+	if b.ImageMediaType != "image/png" {
+		t.Errorf("ImageMediaType: expected %q, got %q", "image/png", b.ImageMediaType)
+	}
+	if b.ImageBase64 != "iVBORw0KGgoAAAA..." {
+		t.Errorf("ImageBase64 round-trip mismatch")
+	}
+}
+
+func TestTextBlockHelper(t *testing.T) {
+	b := TextBlock("hi")
+	if b.Type != "text" || b.Text != "hi" {
+		t.Errorf("TextBlock(\"hi\") = %+v, want type=text text=hi", b)
+	}
+	// Text block must not carry image fields — would confuse providers.
+	if b.ImageBase64 != "" || b.ImageMediaType != "" {
+		t.Errorf("TextBlock leaked image fields: %+v", b)
+	}
+}
+
+func TestImageBlockHelper(t *testing.T) {
+	b := ImageBlock("image/jpeg", "abc=")
+	if b.Type != "image" {
+		t.Errorf("Type: expected image, got %q", b.Type)
+	}
+	if b.ImageMediaType != "image/jpeg" || b.ImageBase64 != "abc=" {
+		t.Errorf("ImageBlock fields wrong: %+v", b)
+	}
+	// And no leaked Text.
+	if b.Text != "" {
+		t.Errorf("ImageBlock leaked Text: %q", b.Text)
+	}
+}
+
 func TestToolDefJSON(t *testing.T) {
 	td := NewToolDef("test_tool", "A test tool", map[string]any{
 		"type": "object",

@@ -80,13 +80,28 @@ type anthropicMsg struct {
 }
 
 type anthropicContentBlock struct {
-	Type      string `json:"type"`
-	Text      string `json:"text,omitempty"`
-	ID        string `json:"id,omitempty"`
-	Name      string `json:"name,omitempty"`
-	Input     any    `json:"input,omitempty"`
-	ToolUseID string `json:"tool_use_id,omitempty"`
-	Content   string `json:"content,omitempty"`
+	Type      string                `json:"type"`
+	Text      string                `json:"text,omitempty"`
+	ID        string                `json:"id,omitempty"`
+	Name      string                `json:"name,omitempty"`
+	Input     any                   `json:"input,omitempty"`
+	ToolUseID string                `json:"tool_use_id,omitempty"`
+	Content   string                `json:"content,omitempty"`
+	Source    *anthropicImageSource `json:"source,omitempty"`
+}
+
+// anthropicImageSource matches Anthropic's image content block shape:
+//
+//	{"type": "image", "source": {"type": "base64",
+//	  "media_type": "image/png", "data": "<base64>"}}
+//
+// We only use base64 sources — URL sources require the model to
+// fetch the image which adds an extra round-trip and fails for
+// localhost / private images. Base64 keeps the payload self-contained.
+type anthropicImageSource struct {
+	Type      string `json:"type"`       // always "base64"
+	MediaType string `json:"media_type"` // image/png, image/jpeg, etc
+	Data      string `json:"data"`       // raw base64
 }
 
 type anthropicTool struct {
@@ -156,6 +171,39 @@ func (a *AnthropicProvider) doRequest(ctx context.Context, messages []Message, t
 				})
 			}
 			aMsgs = append(aMsgs, anthropicMsg{Role: "assistant", Content: blocks})
+			continue
+		}
+
+		// Multimodal user message: translate Blocks into Anthropic's
+		// content array. Text blocks → {type:text, text:...}, image
+		// blocks → {type:image, source:{base64, media_type, data}}.
+		// If Content is also set we prepend it as a text block so
+		// callers can pass "user typed this caption + dropped these
+		// images" without having to manually wrap the caption.
+		if len(m.Blocks) > 0 {
+			var blocks []anthropicContentBlock
+			if m.Content != "" {
+				blocks = append(blocks, anthropicContentBlock{Type: "text", Text: m.Content})
+			}
+			for _, b := range m.Blocks {
+				switch b.Type {
+				case "text":
+					blocks = append(blocks, anthropicContentBlock{Type: "text", Text: b.Text})
+				case "image":
+					blocks = append(blocks, anthropicContentBlock{
+						Type: "image",
+						Source: &anthropicImageSource{
+							Type:      "base64",
+							MediaType: b.ImageMediaType,
+							Data:      b.ImageBase64,
+						},
+					})
+				}
+				// Unknown block types are silently dropped — keeps
+				// the path forgiving when one provider gains a block
+				// kind before the other.
+			}
+			aMsgs = append(aMsgs, anthropicMsg{Role: m.Role, Content: blocks})
 			continue
 		}
 

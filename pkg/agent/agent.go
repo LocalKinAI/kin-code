@@ -255,6 +255,15 @@ func (a *Agent) Run(ctx context.Context, userMessage string) (string, *provider.
 	})
 }
 
+// Attachment is one image (or future media kind) attached to a user
+// message. MediaType ∈ {"image/png", "image/jpeg", "image/gif",
+// "image/webp"} — the four formats both Anthropic and OpenAI vision
+// accept. Base64 is the raw base64 string (no data: URL prefix).
+type Attachment struct {
+	MediaType string
+	Base64    string
+}
+
 // RunWithEvents is the same loop as Run but routes streaming output
 // through a caller-supplied Events sink. The HTTP server uses this
 // to fan tokens + tool calls into SSE; tests use it to assert against
@@ -262,10 +271,32 @@ func (a *Agent) Run(ctx context.Context, userMessage string) (string, *provider.
 // permission.Manager — pass permission.New(true) (yolo) for
 // non-interactive callers like the server.
 func (a *Agent) RunWithEvents(ctx context.Context, userMessage string, ev Events) (string, *provider.Usage, error) {
-	a.messages = append(a.messages, provider.Message{
+	return a.RunWithImagesAndEvents(ctx, userMessage, nil, ev)
+}
+
+// RunWithImagesAndEvents is the multimodal version of RunWithEvents:
+// the user message can include attached images. Each Attachment is
+// translated to a provider.ContentBlock and the message is sent as
+// a multimodal user turn. With no images, the resulting message is
+// identical to the text-only path.
+//
+// Image-bearing turns work on Anthropic claude-3+ models and OpenAI
+// gpt-4o / gpt-4-vision. Non-vision models will reject the request
+// at the provider level — kincode doesn't pre-validate the model
+// since the list of vision-capable models is moving target.
+func (a *Agent) RunWithImagesAndEvents(ctx context.Context, userMessage string, images []Attachment, ev Events) (string, *provider.Usage, error) {
+	userMsg := provider.Message{
 		Role:    "user",
 		Content: userMessage,
-	})
+	}
+	if len(images) > 0 {
+		userMsg.Blocks = make([]provider.ContentBlock, 0, len(images))
+		for _, img := range images {
+			userMsg.Blocks = append(userMsg.Blocks,
+				provider.ImageBlock(img.MediaType, img.Base64))
+		}
+	}
+	a.messages = append(a.messages, userMsg)
 
 	totalUsage := &provider.Usage{}
 

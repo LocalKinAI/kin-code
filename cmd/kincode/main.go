@@ -381,7 +381,7 @@ func runServe(ctx context.Context, a *agent.Agent, port int, providerName, model
 		srv         *server.Server // declared up-front so the chat handler closure can reference it
 	)
 
-	srv = server.New(addr, func(_ context.Context, message string) {
+	srv = server.New(addr, func(_ context.Context, message string, images []server.ChatAttachment) {
 		// Cancel any prior turn that's somehow still in flight, then
 		// install our own cancel for the new one.
 		turnMu.Lock()
@@ -400,7 +400,21 @@ func runServe(ctx context.Context, a *agent.Agent, port int, providerName, model
 			turnMu.Unlock()
 		}()
 
-		_, usage, err := a.RunWithEvents(turnCtx, message, agent.Events{
+		// Translate server.ChatAttachment → agent.Attachment. The
+		// duplication is intentional — pkg/server stays free of an
+		// agent import, and main.go is the natural bridge layer.
+		var atts []agent.Attachment
+		if len(images) > 0 {
+			atts = make([]agent.Attachment, len(images))
+			for i, img := range images {
+				atts[i] = agent.Attachment{
+					MediaType: img.MediaType,
+					Base64:    img.Data,
+				}
+			}
+		}
+
+		_, usage, err := a.RunWithImagesAndEvents(turnCtx, message, atts, agent.Events{
 			OnText: func(chunk string) {
 				if chunk == "" {
 					return

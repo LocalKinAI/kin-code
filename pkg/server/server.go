@@ -68,15 +68,35 @@ type Event struct {
 	InputTokens  int `json:"input_tokens,omitempty"`
 	OutputTokens int `json:"output_tokens,omitempty"`
 
+	// user_message: number of image attachments on this turn (the
+	// images themselves aren't echoed — the UI already has them
+	// locally and base64 over SSE would balloon the stream). Lets
+	// the UI render "📎 N images" alongside the user text bubble.
+	ImageCount int `json:"image_count,omitempty"`
+
 	// error / status hints.
 	Message string `json:"message,omitempty"`
+}
+
+// ChatAttachment is one image (or future media kind) attached to a
+// user turn. MediaType ∈ {"image/png", "image/jpeg", "image/gif",
+// "image/webp"}. Data is the raw base64-encoded image bytes (no
+// data: URL prefix). Mirrors agent.Attachment, but kept duplicated
+// here so pkg/server stays free of an agent import.
+type ChatAttachment struct {
+	MediaType string `json:"media_type"`
+	Data      string `json:"data"`
 }
 
 // ChatHandler is invoked for every accepted POST /api/chat. The server
 // runs it in its own goroutine — the handler should respect ctx
 // cancellation (sent by DELETE /api/chat or server shutdown) and call
 // back into Server.Push to stream events.
-type ChatHandler func(ctx context.Context, message string)
+//
+// attachments is nil for plain text turns; non-nil when the request
+// body included an `images` array. Handlers that don't support
+// multimodal input can ignore the slice.
+type ChatHandler func(ctx context.Context, message string, attachments []ChatAttachment)
 
 // State is the structured response of GET /api/state. Everything
 // optional — UI fills missing fields with defaults.
@@ -303,25 +323,35 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleChatPost(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Message string `json:"message"`
+		Message string           `json:"message"`
+		Images  []ChatAttachment `json:"images,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	msg := strings.TrimSpace(body.Message)
-	if msg == "" {
+	// An images-only message (e.g. user drops an image with no
+	// caption) is valid — the model can describe what it sees. So
+	// only reject when both text and images are absent.
+	if msg == "" && len(body.Images) == 0 {
 		http.Error(w, "empty message", http.StatusBadRequest)
 		return
 	}
 
 	// Echo back into the SSE stream so the frontend doesn't need a
-	// separate "you said:" rendering path.
-	s.Push(Event{Type: "user_message", Text: msg})
+	// separate "you said:" rendering path. Image presence is signaled
+	// by an image_count field — the actual base64 data isn't echoed
+	// (too large; UI already has the image locally).
+	echo := Event{Type: "user_message", Text: msg}
+	if len(body.Images) > 0 {
+		echo.ImageCount = len(body.Images)
+	}
+	s.Push(echo)
 
 	// Run the turn async; respond 202 so the POST resolves and the
 	// SSE stream is the only long-lived connection.
-	go s.chatHandler(context.Background(), msg)
+	go s.chatHandler(context.Background(), msg, body.Images)
 	w.WriteHeader(http.StatusAccepted)
 }
 
