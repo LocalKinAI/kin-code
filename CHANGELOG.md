@@ -1,5 +1,182 @@
 # Changelog
 
+## [0.10.0] - 2026-05-05
+
+**Image input + plan mode.** Two capability additions on top of
+v0.9.0's named subagents — closes the bulk of the Claude Code
+parity gap for day-to-day coding. Vision-capable models (Anthropic
+claude-3+, OpenAI gpt-4o) can now look at screenshots / diagrams /
+mockups; plan mode lets you ask the agent to investigate + propose
+without modifying anything until you approve.
+
+### Added — Image input (vision blocks)
+
+Multimodal user turns. Provider layer translates attached images
+into Anthropic content blocks (`type:image` with base64 source) and
+OpenAI content parts (`image_url` with data URL). Layered shape:
+
+- `provider.Message` gains optional `Blocks []ContentBlock` alongside
+  `Content string`. Empty Blocks = pure-text path (every existing
+  call site unchanged, no breaking change for non-vision models).
+- `provider.ContentBlock {Type, Text, ImageBase64, ImageMediaType}`
+  + helpers `TextBlock(...)` / `ImageBlock(media, base64)`.
+- `agent.Agent.RunWithImagesAndEvents` accepts `[]agent.Attachment`
+  and builds the multimodal user message. `RunWithEvents` stays as
+  a thin pass-through.
+- `server.ChatHandler` signature gains `attachments []ChatAttachment`.
+  `POST /api/chat` now accepts `{message, images:[{media_type,
+  data}]}`. Empty-text turns are valid when images are present.
+- `server.Event` gains `ImageCount` so UIs can render "📎 N images"
+  on user bubbles without re-echoing base64 over SSE.
+
+Tests: `TestMultimodalMessageBlocks` + `TextBlock` / `ImageBlock`
+helper invariants locking the JSON shape.
+
+### Added — Plan mode (read-only gate)
+
+Toggle via `POST /api/plan_mode {enabled}`. While on:
+
+1. `permission.Manager.CheckPlanMode` denies any tool outside the
+   read-only allowlist (`file_read`, `glob`, `grep`, `web_fetch`,
+   `web_search`) with a deny-message shaped to teach the model:
+   "you may only use read-only tools, end with a markdown plan."
+   Hard enforcement at `agent.executeTool` entry.
+2. Agent prepends a directive to every user message while plan mode
+   is on, so the model sees the rules up-front rather than learning
+   by repeated denials. Directive ages out naturally with
+   conversation compaction.
+
+Server surface:
+- `POST /api/plan_mode {enabled} → {enabled}` (server may refuse
+  e.g. mid-turn; UI confirms via the round-tripped bool)
+- SSE `plan_mode` event broadcasts on toggle so multi-window UIs sync
+- `GET /api/state` grows a `plan_mode` field
+- Toggling cancels any in-flight turn (same hygiene as `/api/clear`)
+
+Tests: `TestPlanModeOff_AllowsEverything` +
+`TestPlanModeOn_AllowsReadOnlyDeniesWrite`.
+
+### Why this matters
+
+Image input unlocks the workflows that were getting awkward without
+it: dropping a screenshot to ask "what's this UI bug", pasting a
+design mockup into Code mode, etc. Plan mode is the safety valve —
+you can hand kincode a non-trivial change and have it research +
+draft a plan first, instead of Yolo-modifying files and hoping.
+
+Bumps kincode to feature-parity with Claude Code on the parts that
+matter for desktop-shell users. Remaining gaps (PreToolUse /
+PostToolUse hooks, REPL custom slash commands, full settings.json
+hierarchy) deferred — low value vs. existing surface.
+
+---
+
+## [0.9.0] - 2026-05-05
+
+**Named subagents.** Mirrors Claude Code's named-subagent convention:
+drop a `.md` file with YAML frontmatter at `~/.kincode/agents/<name>.md`
+or `~/.localkin/agents/<name>.md` (family-shared) and the parent
+model gets a dispatchable specialist persona it can call as
+`agent_spawn(agent="code-reviewer", task="...")`.
+
+### Added — Persona dispatch via `agent_spawn(agent, task)`
+
+```yaml
+---
+name: code-reviewer
+description: Senior code reviewer — flags bugs, security, style.
+tools: ["bash", "file_read", "glob", "grep"]   # optional restrict
+model: "claude-sonnet-4-6"                      # optional override
+---
+You are a senior code reviewer...
+```
+
+- `pkg/agent/persona.go`: `SubAgentPersona` type + `LoadSubAgentPersona`
+  + `ListSubAgentPersonas`. Walks both directories, dedups by name
+  (user-level wins over family-shared), parses YAML frontmatter +
+  `.md` body as the subagent's system prompt.
+- `pkg/tools/agent_spawn.go`: `SubAgentFactory` signature changed
+  to `func(personaName string) SubAgentRunner`. New `Personas
+  []PersonaInfo` field surfaces names + descriptions in the tool's
+  `Description()` so the parent model knows what's available without
+  filesystem queries. `Def()` exposes optional `agent` param as enum.
+- `pkg/tools/tools.go`: `RegisterDefaultsWithAgent(r, factory,
+  personas...)` variadic personas.
+- `cmd/kincode/main.go`: discovers personas at boot, factory closure
+  loads persona's body as subagent system prompt. Falls back to
+  parent's prompt if the named persona doesn't exist (better to run
+  the task than refuse outright).
+
+`PersonaInfo` struct prevents `pkg/tools → pkg/agent` circular
+import — `pkg/tools` advertises persona metadata; `main.go` is the
+bridge layer that loads persona bodies via `agent.LoadSubAgentPersona`.
+
+### Why named subagents matter
+
+Sub-agents in v0.8.0 were generic — you could spawn a parallel
+worker but it inherited the parent's system prompt. Named subagents
+let you dispatch specialized tasks to specialized prompts:
+"have the code-reviewer look at this diff, have the test-writer
+generate XCTest cases for this Swift file." The parent agent stays
+cleaner because expertise lives in the persona file, not the prompt.
+
+---
+
+## [0.8.0] - 2026-05-04
+
+**Skill forge + project memory + MultiEdit + TodoWrite.** Five
+Tier-S/A capability additions in one push, closing the most-cited
+Claude Code gaps:
+
+### Added — External skill forge (`pkg/tools/external.go`)
+
+kincode's external skill loader matches kinclaw kernel's `SKILL.md`
+format, so the LocalKin family shares one skill marketplace at
+`~/.localkin/skills/`. `LoadAllExternalSkills()` searches
+`~/.kincode/skills/` (kincode-specific) then `~/.localkin/skills/`
+(family-shared), dedups by name. Each skill becomes a regular tool
+the agent can invoke alongside the 10 builtins — kept binary at
+17MB while supporting Playwright / browser-use / image-gen via
+external dirs with their own deps.
+
+### Added — Project memory (`pkg/agent/memory.go`)
+
+`LoadProjectMemory(startDir)` walks up at most 10 levels looking for
+`KINCODE.md` (preferred) or `CLAUDE.md` (cross-tool portability
+fallback). Stops at `$HOME` or root. Auto-prepended to system prompt
+at boot so the agent has project conventions / contributor notes /
+"don't touch X" rules without you re-typing them every session.
+
+### Added — `multi_edit` tool (`pkg/tools/multi_edit.go`)
+
+Atomic multi-place find-replace. Sequential edits in one call (each
+sees prior edits' state); failure mode names the failing edit
+(1-indexed) with no partial writes. Matches Claude Code's MultiEdit
+shape so cross-tool memory references work.
+
+### Added — `todo_write` tool (`pkg/tools/todo_write.go`)
+
+In-process per-agent `TodoItem` list across rounds. Status enum:
+`pending` / `in_progress` / `completed`. Full-list-overwrite
+semantics (matches Claude Code). Validates non-empty `content` +
+`activeForm`. Soft-warns when more than one item is `in_progress`.
+
+### Added — `scripts/install.sh`
+
+`go build` → `codesign --force --sign - --identifier
+dev.localkin.kincode --options=runtime` → install to
+`~/.localkin/bin/kincode`. Stable bundle ID across rebuilds means
+macOS TCC remembers grants. Re-signs at install path.
+
+### Added — JSON-encoded SSE event params
+
+`stringifyArgs` in `cmd/kincode/main.go` JSON-encodes complex args
+(arrays / maps) instead of `fmt.Sprint`. Lets desktop shells parse
+structured tool args (e.g. `todos` array for inline checklist UI)
+without re-running the tool just to get its args back.
+
+---
+
 ## [0.7.1] - 2026-05-04
 
 **First external contribution.** Tavily Search API support landed

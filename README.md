@@ -8,17 +8,20 @@ Like Claude Code, but open-source and 10x lighter.
 
 - Single binary (~10MB), zero runtime dependencies
 - Multi-provider: Anthropic, OpenAI, Ollama (any OpenAI-compatible endpoint)
-- 10 built-in tools: bash, file read/write/edit, glob, grep, web_fetch, web_search, memory, agent_spawn
+- **12 built-in tools**: bash, file_read / file_write / file_edit / multi_edit, glob, grep, web_fetch, web_search, memory, agent_spawn, todo_write
+- **Image input** — vision blocks for Anthropic claude-3+ and OpenAI gpt-4o. Send screenshots, mockups, diagrams via `POST /api/chat {message, images:[{media_type, data}]}`
+- **Plan mode** — `POST /api/plan_mode {enabled}` toggles a read-only gate. Agent investigates + drafts a markdown plan, doesn't modify until you approve
+- **Named subagents** — drop a `.md` file at `~/.kincode/agents/<name>.md` or `~/.localkin/agents/<name>.md` (family-shared) with YAML frontmatter; the parent model dispatches via `agent_spawn(agent="code-reviewer", task="...")`
+- **External skill forge** — `~/.kincode/skills/` and `~/.localkin/skills/` SKILL.md files become regular tools at boot. Same format kinclaw uses, so the family shares one skill marketplace
+- **Project memory** — auto-loads `KINCODE.md` (or `CLAUDE.md` for cross-tool portability) from any parent dir of cwd
 - Permission system with tool call confirmation (or `-yolo` to skip)
 - **Soul files** with `brain:` config — switch persona AND provider/model per soul, kinclaw-kernel-compatible format
 - **`-serve` mode** — HTTP+SSE server for desktop shell integration (paired with [KinClaw Mac](https://github.com/LocalKinAI/kinclaw-mac) Code mode)
 - Streaming responses with markdown rendering
 - Context compaction: auto-summarizes when context gets large
-- Sub-agents: spawn parallel tasks with agent_spawn
 - MCP support: connect any MCP-compatible tool server
 - Persistent memory across sessions
 - Web tools: fetch URLs and search the web (DuckDuckGo by default; set `TAVILY_API_KEY` to use Tavily for LLM-tuned results)
-- Skill templates: reusable prompt patterns (/skill)
 - Extended thinking: deep reasoning mode for complex problems
 - Session persistence: auto-save/restore conversations across restarts
 - Fast: Go concurrency, minimal memory footprint
