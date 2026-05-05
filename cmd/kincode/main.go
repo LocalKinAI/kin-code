@@ -378,6 +378,14 @@ func runServe(ctx context.Context, a *agent.Agent, port int, providerName, model
 		}
 	})
 
+	srv.SetClearHandler(func() {
+		// Drop the agent's conversation memory back to a fresh state.
+		// agent.Clear() preserves the system prompt and resets messages.
+		// (handleClear in pkg/server already cancels any in-flight turn
+		// before calling us, so we don't race against the agent loop.)
+		a.Clear()
+	})
+
 	srv.SetStateHandler(func() server.State {
 		cwd, _ := os.Getwd()
 		return server.State{

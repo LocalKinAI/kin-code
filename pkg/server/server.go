@@ -95,11 +95,19 @@ type StateHandler func() State
 // cancel the in-flight turn's ctx; no-op when nothing is running.
 type InterruptHandler func()
 
+// ClearHandler is invoked when POST /api/clear fires. Should reset
+// the agent's conversation memory back to "fresh session" state
+// (system prompt only, no user/assistant turns). Used by the desktop
+// shell to recover from stuck error states without restarting the
+// kincode subprocess.
+type ClearHandler func()
+
 // Server owns the HTTP listener + SSE subscriber map.
 type Server struct {
 	addr             string
 	chatHandler      ChatHandler
 	interruptHandler InterruptHandler
+	clearHandler     ClearHandler
 	stateHandler     StateHandler
 
 	mu   sync.Mutex
@@ -122,6 +130,11 @@ func New(addr string, h ChatHandler) *Server {
 // returns 501 — UI's interrupt button stays a no-op until normal
 // turn_done.
 func (s *Server) SetInterruptHandler(h InterruptHandler) { s.interruptHandler = h }
+
+// SetClearHandler wires POST /api/clear. Without it the endpoint
+// returns 501 — UI's "new session" button can only clear local
+// state, not the agent's server-side message history.
+func (s *Server) SetClearHandler(h ClearHandler) { s.clearHandler = h }
 
 // SetStateHandler wires GET /api/state. Without it the endpoint
 // returns an empty State{} (UI shows zero counts / no repo).
@@ -164,6 +177,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux.HandleFunc("/api/state", s.handleState)
 	mux.HandleFunc("/api/repo", s.handleRepo)
 	mux.HandleFunc("/api/chat", s.handleChat)
+	mux.HandleFunc("/api/clear", s.handleClear)
 	mux.HandleFunc("/api/events", s.handleEvents)
 
 	listener, err := net.Listen("tcp", s.addr)
@@ -292,6 +306,29 @@ func (s *Server) handleChatDelete(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	s.interruptHandler()
+	w.WriteHeader(http.StatusAccepted)
+}
+
+// handleClear resets the agent's conversation memory back to a fresh
+// "system prompt only" state. Used by the desktop shell to recover
+// from stuck error states (e.g. provider rejected a malformed history
+// and every retry hits the same 400) without restarting the kincode
+// subprocess.
+func (s *Server) handleClear(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.clearHandler == nil {
+		http.Error(w, "clear not wired", http.StatusNotImplemented)
+		return
+	}
+	// Cancel any in-flight turn first — clearing messages while the
+	// agent loop is mid-iteration would race against append calls.
+	if s.interruptHandler != nil {
+		s.interruptHandler()
+	}
+	s.clearHandler()
 	w.WriteHeader(http.StatusAccepted)
 }
 
