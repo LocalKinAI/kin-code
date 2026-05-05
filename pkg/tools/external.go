@@ -229,13 +229,20 @@ func LoadExternalSkillsFromDir(dir string) []Tool {
 // LoadAllExternalSkills loads from the standard search paths in
 // priority order:
 //
-//   1. ~/.kincode/skills/         — kincode-specific skills
-//   2. ~/.localkin/skills/         — shared LocalKin family skills
-//                                   (kinclaw + kincode use the same
-//                                   web_browser, image_gen, etc.)
+//  1. ~/.kincode/skills/                — kincode-specific skills
+//  2. ~/.localkin/skills/                — shared LocalKin family skills
+//     (kinclaw + kincode use the same web_browser, image_gen, etc.)
+//  3. $KINCODE_SKILL_DIRS env var        — colon-separated extra dirs
+//     (kinclaw-mac's Makefile sets this to the dev repo's skills/ so
+//     a fresh `make run` discovers source-tree skills without copy).
+//  4. ~/.localkin/skill-sources.txt      — newline-separated extra
+//     dirs, persistent across reboots; written by install.sh.
+//     Shared with kinclaw — both kernels read this file so the
+//     LocalKin family stays one-skill-marketplace.
 //
 // Earlier paths win on name conflicts: a kincode-specific override
-// takes precedence over the shared family skill of the same name.
+// takes precedence over the shared family skill of the same name,
+// which beats env-vared dirs, which beat sidecar-file dirs.
 // Returns the merged list ready for Registry.Register.
 func LoadAllExternalSkills() []Tool {
 	home, err := os.UserHomeDir()
@@ -245,6 +252,29 @@ func LoadAllExternalSkills() []Tool {
 	paths := []string{
 		filepath.Join(home, ".kincode", "skills"),
 		filepath.Join(home, ".localkin", "skills"),
+	}
+	if env := os.Getenv("KINCODE_SKILL_DIRS"); env != "" {
+		for _, p := range strings.Split(env, ":") {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				paths = append(paths, p)
+			}
+		}
+	}
+	// Sidecar file. Shared with kinclaw on purpose — one place to
+	// register dev-repo skill dirs for the whole LocalKin family.
+	srcFile := filepath.Join(home, ".localkin", "skill-sources.txt")
+	if data, err := os.ReadFile(srcFile); err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			if strings.HasPrefix(line, "~/") {
+				line = filepath.Join(home, line[2:])
+			}
+			paths = append(paths, line)
+		}
 	}
 	seen := map[string]bool{}
 	var merged []Tool
